@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from 'react'
 
 // 1. Supabase 연동 (대표님 정보로 변경)
 const supabaseUrl = 'https://vjjowuamlwnuagaacind.supabase.co'
-const supabaseKey = 'sb_publishable_6dZKot10ye-Ii1OEw1d_Mg_ZFodzHjE''
+const supabaseKey = 'sb_publishable_6dZKot10ye-Ii1OEw1d_Mg_ZFodzHjE'
 const supabase = createClient(supabaseUrl, supabaseKey)
 
 export default function Home() {
