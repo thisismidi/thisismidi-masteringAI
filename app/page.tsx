@@ -67,7 +67,6 @@ export default function Home() {
     return () => subscription.unsubscribe()
   }, [])
 
-  // 🚨 수정한 부분: 마스터링 파형 변형 시뮬레이션 로직 추가 🚨
   const draw = async (f: File, canvas: HTMLCanvasElement, color: string, isMaster: boolean = false) => {
     if (typeof window === 'undefined' || !canvas) return
     const ctx = canvas.getContext('2d')
@@ -78,10 +77,7 @@ export default function Home() {
       const data = buffer.getChannelData(0)
       const step = Math.ceil(data.length / canvas.width)
       
-      // 시각적 게인(Gain) 및 리미터(Limiter) 수치 계산
-      // Target LUFS가 0에 가까워질수록(-6 등) 파형이 커짐
       const visualGain = isMaster ? Math.max(0.5, 1 + (parseFloat(targetLufs) + 14) * 0.15) : 1;
-      // True Peak에 따라 위아래가 잘림 (dB를 Linear로 변환)
       const tpLimit = isMaster ? Math.pow(10, parseFloat(truePeak) / 20) : 1;
       
       ctx.clearRect(0, 0, canvas.width, canvas.height)
@@ -95,9 +91,9 @@ export default function Home() {
           let d = data[i * step + j]
           
           if (isMaster) {
-            d = d * visualGain // 소리를 키움 (뚱뚱해짐)
-            if (d > tpLimit) d = tpLimit // 천장 깎기
-            if (d < -tpLimit) d = -tpLimit // 바닥 깎기
+            d = d * visualGain 
+            if (d > tpLimit) d = tpLimit 
+            if (d < -tpLimit) d = -tpLimit 
           }
           
           if (d < min) min = d; if (d > max) max = d
@@ -125,7 +121,6 @@ export default function Home() {
   }
 
   useEffect(() => {
-    // 원본은 시각적 조작 없이 순수하게 그림
     if (file && origCanvas.current) draw(file, origCanvas.current, '#4ade80', false)
   }, [file, isLightMode])
 
@@ -142,7 +137,6 @@ export default function Home() {
 
     setTimeout(() => {
       setMastered(true)
-      // 마스터링 시뮬레이션 플래그(true)를 넘겨서 파형을 변형시킴
       if (mastCanvas.current) draw(file, mastCanvas.current, '#3b82f6', true)
       setMasterAudioUrl(audioUrl)
     }, 1500)
@@ -192,7 +186,8 @@ export default function Home() {
 
       <div className="container" style={{maxWidth:'1000px', margin:'0 auto', padding:'20px'}}>
         <header style={{display:'flex', justifyContent:'space-between', marginBottom:'40px', alignItems:'center'}}>
-          <h1 style={{color:'var(--acc)', fontSize:'1.5rem', fontWeight:900, margin:0}}>MSTRMND <span style={{opacity:0.3}}>.</span></h1>
+          {/* 🚨 사이트 이름 변경 부분 🚨 */}
+          <h1 style={{color:'var(--acc)', fontSize:'1.5rem', fontWeight:900, margin:0}}>THISISMIDI <span style={{opacity:0.3}}>.</span></h1>
           <div style={{display:'flex', gap:'10px', alignItems:'center'}}>
             {user && <span style={{fontSize:'0.7rem', color:'#888', marginRight:'10px'}}>TIER: <b style={{color: tier==='DEVELOPER'?'#eab308':'var(--txt)'}}>{tier}</b></span>}
             <button onClick={() => setIsLightMode(!isLightMode)} className="btn-ui">{isLightMode ? 'DARK' : 'LIGHT'}</button>
@@ -209,8 +204,9 @@ export default function Home() {
           <div className="dash">
             <section className="panel upload" style={{marginBottom:'20px'}}>
               <input type="file" id="u-file" onChange={handleFileUpload} hidden accept="audio/*" />
+              {/* 🚨 업로드 문구 변경 부분 🚨 */}
               <label htmlFor="u-file" className="dropzone" style={{cursor:'pointer', display:'block', padding:'30px', border:'1px dashed var(--brd)', textAlign:'center', borderRadius:'12px'}}>
-                {file ? <b style={{color:'var(--acc)'}}>{file.name}</b> : "Click to load your audio file"}
+                {file ? <b style={{color:'var(--acc)'}}>{file.name}</b> : "Click to load your audio file (wav, flac)"}
               </label>
             </section>
 
