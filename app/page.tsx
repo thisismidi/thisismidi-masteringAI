@@ -45,7 +45,7 @@ export default function Home() {
   const [monoBass, setMonoBass] = useState("0") // 0 ~ 100%
   
   // 아웃풋 포맷 상태
-  const [format, setFormat] = useState('mp3') // 기본값을 mp3로
+  const [format, setFormat] = useState('mp3') 
   const [sampleRate, setSampleRate] = useState('44100')
   const [bitDepth, setBitDepth] = useState('16')
 
@@ -56,7 +56,6 @@ export default function Home() {
       const { data: { session } } = await supabase.auth.getSession()
       if (session?.user) {
         setUser(session.user)
-        // 🚨 대표님 이메일 세팅 완료!
         if (session.user.email === 'itsfreiar@gmail.com') {
           setTier('DEVELOPER')
         } else {
@@ -76,7 +75,6 @@ export default function Home() {
     return () => subscription.unsubscribe()
   }, [])
 
-  // 활성화된 파일이 바뀔 때마다 오디오 URL 업데이트
   useEffect(() => {
     if (files.length > 0 && files[activeIndex]) {
       const url = URL.createObjectURL(files[activeIndex])
@@ -132,13 +130,11 @@ export default function Home() {
     } catch (e) { console.error(e) }
   }
 
-  // 🚨 수정한 부분: 티어에 따른 업로드 제한 로직 🚨
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newFiles = Array.from(e.target.files || [])
     if (newFiles.length === 0) return
     
     if (!isPro) {
-      // FREE 티어는 무조건 1곡만 유지 (덮어쓰기)
       if (newFiles.length > 1) {
         alert("FREE 티어는 1곡씩만 작업할 수 있습니다.")
         return
@@ -148,7 +144,6 @@ export default function Home() {
       return
     }
     
-    // PRO / DEVELOPER 티어는 15곡 유지
     if (files.length + newFiles.length > 15) {
       alert("최대 15곡까지만 업로드할 수 있습니다.")
       return
@@ -251,18 +246,16 @@ export default function Home() {
           </div>
         ) : (
           <div className="dash">
-            {/* 1. Track Queue 영역 */}
+            {/* 1. Track Queue 영역 (+ START 버튼 이동) */}
             <section className="panel" style={{marginBottom:'20px', padding:'0'}}>
               <div style={{padding:'15px 20px', borderBottom:'1px solid var(--brd)', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
                 <h2 style={{fontSize:'0.9rem', margin:0, fontWeight:'bold'}}>Track Queue</h2>
-                {/* 🚨 티어에 따라 동적으로 변하는 카운터 🚨 */}
                 <span style={{fontSize:'0.7rem', color:'#888', background:'var(--bg)', padding:'4px 8px', borderRadius:'4px'}}>{files.length} / {isPro ? 15 : 1} tracks</span>
               </div>
               
               <div style={{padding:'20px'}}>
-                {/* 🚨 FREE 유저는 탐색기에서 애초에 다중선택을 못하게 막음 🚨 */}
                 <input type="file" id="u-file" onChange={handleFileUpload} hidden accept="audio/*" multiple={isPro} />
-                <label htmlFor="u-file" className="dropzone" style={{cursor:'pointer', display:'block', padding:'20px', border:'1px dashed var(--brd)', textAlign:'center', borderRadius:'8px', marginBottom:'15px', fontSize:'0.8rem', color:'#888'}}>
+                <label htmlFor="u-file" className="dropzone" style={{cursor:'pointer', display:'block', padding:'20px', border:'1px dashed var(--brd)', textAlign:'center', borderRadius:'8px', marginBottom: files.length > 0 ? '15px' : '0', fontSize:'0.8rem', color:'#888'}}>
                   Drop audio files here (WAV · MP3 · FLAC) or <b style={{color:'var(--acc)'}}>Click to Upload</b>
                 </label>
                 
@@ -279,6 +272,9 @@ export default function Home() {
                     ))}
                   </ul>
                 )}
+                
+                {/* 🚨 START MASTERING 버튼을 이쪽으로 끌어올렸습니다 🚨 */}
+                <button onClick={runMastering} className="render-btn" disabled={files.length === 0} style={{width:'100%', background:'var(--acc)', color:'#000', border:'none', padding:'18px', borderRadius:'12px', fontWeight:900, cursor:'pointer', transition:'0.2s', marginTop:'20px'}}>START MASTERING</button>
               </div>
             </section>
 
@@ -410,7 +406,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                <button onClick={runMastering} className="render-btn" disabled={files.length === 0} style={{width:'100%', background:'var(--acc)', color:'#000', border:'none', padding:'18px', borderRadius:'12px', fontWeight:900, cursor:'pointer', transition:'0.2s'}}>START MASTERING</button>
               </aside>
             </div>
           </div>
