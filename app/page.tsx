@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from 'react'
 
 // 1. Supabase 연동 (대표님 정보로 변경)
 const supabaseUrl = 'https://vjjowuamlwnuagaacind.supabase.co'
-const supabaseKey = 'sb_publishable_6dZKot10ye-Ii1OEw1d_Mg_ZFodzHjE'
+const supabaseKey = 'sb_publishable_6dZKot10ye-Ii1OEw1d_Mg_ZFodzHjE''
 const supabase = createClient(supabaseUrl, supabaseKey)
 
 export default function Home() {
@@ -13,8 +13,10 @@ export default function Home() {
   const [tier, setTier] = useState('FREE') 
   const [isLightMode, setIsLightMode] = useState(false)
   
-  // 파일 및 오디오 상태
-  const [file, setFile] = useState<File | null>(null)
+  // 파일 및 트랙 큐 상태 (최대 15개)
+  const [files, setFiles] = useState<File[]>([])
+  const [activeIndex, setActiveIndex] = useState<number>(0)
+  
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [masterAudioUrl, setMasterAudioUrl] = useState<string | null>(null)
   const [mastered, setMastered] = useState(false)
@@ -33,14 +35,21 @@ export default function Home() {
   const origCanvas = useRef<HTMLCanvasElement>(null)
   const mastCanvas = useRef<HTMLCanvasElement>(null)
 
-  // 엔진 파라미터 상태
+  // 엔진 파라미터 상태 (Loudness)
   const [targetLufs, setTargetLufs] = useState("-14.0")
   const [truePeak, setTruePeak] = useState("-1.0")
   
+  // PRO 파라미터 상태 (Tone & Stereo)
+  const [warmth, setWarmth] = useState("0") // 0 ~ 100%
+  const [stereoWidth, setStereoWidth] = useState("100") // 0 ~ 200%
+  const [monoBass, setMonoBass] = useState("0") // 0 ~ 100%
+  
   // 아웃풋 포맷 상태
-  const [format, setFormat] = useState('wav')
-  const [sampleRate, setSampleRate] = useState('48000')
-  const [bitDepth, setBitDepth] = useState('24')
+  const [format, setFormat] = useState('mp3') // 기본값을 mp3로
+  const [sampleRate, setSampleRate] = useState('44100')
+  const [bitDepth, setBitDepth] = useState('16')
+
+  const isPro = tier === 'PRO' || tier === 'DEVELOPER'
 
   useEffect(() => {
     const init = async () => {
@@ -60,12 +69,28 @@ export default function Home() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, s) => {
       setUser(s?.user ?? null)
       if (!s) { 
-        setFile(null); setAudioUrl(null); setMasterAudioUrl(null); 
+        setFiles([]); setActiveIndex(0); setAudioUrl(null); setMasterAudioUrl(null); 
         setOrigIsPlaying(false); setMastIsPlaying(false); 
       }
     })
     return () => subscription.unsubscribe()
   }, [])
+
+  // 활성화된 파일이 바뀔 때마다 오디오 URL 업데이트
+  useEffect(() => {
+    if (files.length > 0 && files[activeIndex]) {
+      const url = URL.createObjectURL(files[activeIndex])
+      setAudioUrl(url)
+      setMasterAudioUrl(null)
+      setMastered(false)
+      setOrigIsPlaying(false)
+      setMastIsPlaying(false)
+      return () => URL.revokeObjectURL(url)
+    } else {
+      setAudioUrl(null)
+      setMasterAudioUrl(null)
+    }
+  }, [activeIndex, files])
 
   const draw = async (f: File, canvas: HTMLCanvasElement, color: string, isMaster: boolean = false) => {
     if (typeof window === 'undefined' || !canvas) return
@@ -79,6 +104,8 @@ export default function Home() {
       
       const visualGain = isMaster ? Math.max(0.5, 1 + (parseFloat(targetLufs) + 14) * 0.15) : 1;
       const tpLimit = isMaster ? Math.pow(10, parseFloat(truePeak) / 20) : 1;
+      // Warmth가 높을수록 파형이 꽉 차보이게(RMS 증가) 시뮬레이션
+      const warmthFactor = isMaster && isPro ? 1 + (parseFloat(warmth) * 0.002) : 1;
       
       ctx.clearRect(0, 0, canvas.width, canvas.height)
       ctx.beginPath()
@@ -91,7 +118,7 @@ export default function Home() {
           let d = data[i * step + j]
           
           if (isMaster) {
-            d = d * visualGain 
+            d = d * visualGain * warmthFactor
             if (d > tpLimit) d = tpLimit 
             if (d < -tpLimit) d = -tpLimit 
           }
@@ -107,25 +134,35 @@ export default function Home() {
   }
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0] || null
-    setFile(f)
-    setMastered(false)
-    setOrigIsPlaying(false); setMastIsPlaying(false)
-    if (f) {
-      const url = URL.createObjectURL(f)
-      setAudioUrl(url)
-      setMasterAudioUrl(null)
-    } else {
-      setAudioUrl(null); setMasterAudioUrl(null)
+    const newFiles = Array.from(e.target.files || [])
+    if (newFiles.length === 0) return
+    
+    if (files.length + newFiles.length > 15) {
+      alert("최대 15곡까지만 업로드할 수 있습니다.")
+      return
+    }
+    
+    setFiles(prev => [...prev, ...newFiles])
+    if (files.length === 0) setActiveIndex(0) // 처음 올리면 1번 트랙 자동 선택
+  }
+
+  const removeFile = (index: number) => {
+    const newFiles = [...files]
+    newFiles.splice(index, 1)
+    setFiles(newFiles)
+    if (activeIndex >= newFiles.length) {
+      setActiveIndex(Math.max(0, newFiles.length - 1))
     }
   }
 
   useEffect(() => {
-    if (file && origCanvas.current) draw(file, origCanvas.current, '#4ade80', false)
-  }, [file, isLightMode])
+    if (files[activeIndex] && origCanvas.current) {
+      draw(files[activeIndex], origCanvas.current, '#4ade80', false)
+    }
+  }, [files, activeIndex, isLightMode])
 
   const runMastering = () => {
-    if (!file) return
+    if (files.length === 0) return
     
     setMastered(false)
     setMastTime(0)
@@ -137,7 +174,7 @@ export default function Home() {
 
     setTimeout(() => {
       setMastered(true)
-      if (mastCanvas.current) draw(file, mastCanvas.current, '#3b82f6', true)
+      if (mastCanvas.current) draw(files[activeIndex], mastCanvas.current, '#3b82f6', true)
       setMasterAudioUrl(audioUrl)
     }, 1500)
   }
@@ -175,7 +212,9 @@ export default function Home() {
     else if (!isMaster && !origIsPlaying) togglePlayOrig()
   }
 
-  const isMp3 = format === 'mp3'
+  // FREE 티어는 무조건 mp3, 아니면 선택값
+  const effectiveFormat = isPro ? format : 'mp3'
+  const isMp3 = effectiveFormat === 'mp3'
   const displaySampleRate = isMp3 ? '44100' : sampleRate
   const displayBitDepth = isMp3 ? '16' : bitDepth
 
@@ -184,11 +223,11 @@ export default function Home() {
       <audio ref={origAudioRef} src={audioUrl || ''} onTimeUpdate={() => setOrigTime(origAudioRef.current?.currentTime || 0)} onLoadedMetadata={() => setOrigDuration(origAudioRef.current?.duration || 0)} onEnded={() => setOrigIsPlaying(false)} />
       <audio ref={mastAudioRef} src={masterAudioUrl || ''} onTimeUpdate={() => setMastTime(mastAudioRef.current?.currentTime || 0)} onLoadedMetadata={() => setMastDuration(mastAudioRef.current?.duration || 0)} onEnded={() => setMastIsPlaying(false)} />
 
-      <div className="container" style={{maxWidth:'1000px', margin:'0 auto', padding:'20px'}}>
+      <div className="container" style={{maxWidth:'1200px', margin:'0 auto', padding:'20px'}}>
         <header style={{display:'flex', justifyContent:'space-between', marginBottom:'40px', alignItems:'center'}}>
           <h1 style={{color:'var(--acc)', fontSize:'1.5rem', fontWeight:900, margin:0}}>THISISMIDI <span style={{opacity:0.3}}>.</span></h1>
           <div style={{display:'flex', gap:'10px', alignItems:'center'}}>
-            {user && <span style={{fontSize:'0.7rem', color:'#888', marginRight:'10px'}}>TIER: <b style={{color: tier==='DEVELOPER'?'#eab308':'var(--txt)'}}>{tier}</b></span>}
+            {user && <span style={{fontSize:'0.7rem', color:'#888', marginRight:'10px'}}>TIER: <b style={{color: tier==='DEVELOPER'?'#eab308':(tier==='PRO'?'#3b82f6':'var(--txt)')}}>{tier}</b></span>}
             <button onClick={() => setIsLightMode(!isLightMode)} className="btn-ui">{isLightMode ? 'DARK' : 'LIGHT'}</button>
             {user && <button onClick={() => supabase.auth.signOut()} className="btn-ui">LOGOUT</button>}
           </div>
@@ -201,28 +240,51 @@ export default function Home() {
           </div>
         ) : (
           <div className="dash">
-            <section className="panel upload" style={{marginBottom:'20px'}}>
-              <input type="file" id="u-file" onChange={handleFileUpload} hidden accept="audio/*" />
-              <label htmlFor="u-file" className="dropzone" style={{cursor:'pointer', display:'block', padding:'30px', border:'1px dashed var(--brd)', textAlign:'center', borderRadius:'12px'}}>
-                {file ? <b style={{color:'var(--acc)'}}>{file.name}</b> : "Click to load your audio file (wav, flac)"}
-              </label>
+            {/* 1. Track Queue 영역 */}
+            <section className="panel" style={{marginBottom:'20px', padding:'0'}}>
+              <div style={{padding:'15px 20px', borderBottom:'1px solid var(--brd)', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+                <h2 style={{fontSize:'0.9rem', margin:0, fontWeight:'bold'}}>Track Queue</h2>
+                <span style={{fontSize:'0.7rem', color:'#888', background:'var(--bg)', padding:'4px 8px', borderRadius:'4px'}}>{files.length} / 15 tracks</span>
+              </div>
+              
+              <div style={{padding:'20px'}}>
+                <input type="file" id="u-file" onChange={handleFileUpload} hidden accept="audio/*" multiple />
+                <label htmlFor="u-file" className="dropzone" style={{cursor:'pointer', display:'block', padding:'20px', border:'1px dashed var(--brd)', textAlign:'center', borderRadius:'8px', marginBottom:'15px', fontSize:'0.8rem', color:'#888'}}>
+                  Drop audio files here (WAV · MP3 · FLAC) or <b style={{color:'var(--acc)'}}>Click to Upload</b>
+                </label>
+                
+                {files.length > 0 && (
+                  <ul style={{listStyle:'none', margin:0, padding:0, maxHeight:'200px', overflowY:'auto'}}>
+                    {files.map((f, i) => (
+                      <li key={i} onClick={() => setActiveIndex(i)} style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'10px 15px', background: activeIndex === i ? 'rgba(74,222,128,0.1)' : 'transparent', border:'1px solid', borderColor: activeIndex === i ? 'var(--acc)' : 'transparent', borderRadius:'6px', cursor:'pointer', marginBottom:'5px', transition:'0.2s'}}>
+                        <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
+                          <div style={{width:'12px', height:'12px', borderRadius:'50%', background: activeIndex === i ? 'var(--acc)' : '#444'}}></div>
+                          <span style={{fontSize:'0.85rem', color: activeIndex === i ? 'var(--acc)' : 'var(--txt)'}}>{(i+1).toString().padStart(2, '0')}. {f.name}</span>
+                        </div>
+                        <button onClick={(e) => { e.stopPropagation(); removeFile(i); }} style={{background:'none', border:'none', color:'#666', cursor:'pointer', fontSize:'1rem'}}>🗑</button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </section>
 
-            <div className="main-grid" style={{display:'grid', gridTemplateColumns:'1fr 320px', gap:'20px'}}>
+            <div className="main-grid" style={{display:'grid', gridTemplateColumns:'1fr 340px', gap:'20px'}}>
+              {/* 2. A/B Monitor 영역 */}
               <div className="monitors">
                 <div className="panel" style={{marginBottom:'20px'}}>
                   <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'15px'}}>
                     <p className="p-label" style={{margin:0}}>ORIGINAL WAVEFORM</p>
-                    {file && (
+                    {files.length > 0 && (
                       <div style={{display:'flex', gap:'15px', alignItems:'center'}}>
                         <span style={{fontFamily:'monospace', fontSize:'0.75rem', color:'#888', letterSpacing:'1px'}}>{formatTime(origTime)} / {formatTime(origDuration)}</span>
                         <button onClick={togglePlayOrig} className="play-btn">{origIsPlaying ? '⏹ STOP' : '▶ PLAY'}</button>
                       </div>
                     )}
                   </div>
-                  <div style={{position:'relative', cursor:'pointer'}} onClick={(e) => handleSeek(e, origAudioRef, origDuration, false)}>
-                    <canvas ref={origCanvas} width={700} height={120} style={{width:'100%', background:'rgba(0,0,0,0.2)', borderRadius:'8px', display:'block'}} />
-                    {file && <div style={{position:'absolute', top:0, bottom:0, left:`${origDuration > 0 ? (origTime/origDuration)*100 : 0}%`, width:'2px', background:'#fff', pointerEvents:'none'}} />}
+                  <div style={{position:'relative', cursor: files.length > 0 ? 'pointer' : 'default'}} onClick={(e) => files.length > 0 && handleSeek(e, origAudioRef, origDuration, false)}>
+                    <canvas ref={origCanvas} width={700} height={180} style={{width:'100%', background:'rgba(0,0,0,0.2)', borderRadius:'8px', display:'block'}} />
+                    {files.length > 0 && <div style={{position:'absolute', top:0, bottom:0, left:`${origDuration > 0 ? (origTime/origDuration)*100 : 0}%`, width:'2px', background:'#fff', pointerEvents:'none'}} />}
                   </div>
                 </div>
 
@@ -233,52 +295,98 @@ export default function Home() {
                       <div style={{display:'flex', gap:'10px', alignItems:'center'}}>
                         <span style={{fontFamily:'monospace', fontSize:'0.75rem', color:'#888', letterSpacing:'1px', marginRight:'5px'}}>{formatTime(mastTime)} / {formatTime(mastDuration)}</span>
                         <button onClick={togglePlayMast} className="play-btn">{mastIsPlaying ? '⏹ STOP' : '▶ PLAY'}</button>
-                        <a href={masterAudioUrl || '#'} download={`mastered_${file?.name || 'audio'}`} style={{textDecoration:'none'}}>
+                        <a href={masterAudioUrl || '#'} download={`mastered_${files[activeIndex]?.name || 'audio'}`} style={{textDecoration:'none'}}>
                           <button className="play-btn" style={{background:'#3b82f6'}}>⬇ DOWNLOAD</button>
                         </a>
                       </div>
                     )}
                   </div>
                   <div style={{position:'relative', cursor: mastered ? 'pointer' : 'default'}} onClick={(e) => mastered && handleSeek(e, mastAudioRef, mastDuration, true)}>
-                    <canvas ref={mastCanvas} width={700} height={120} style={{width:'100%', background:'rgba(0,0,0,0.2)', borderRadius:'8px', display:'block'}} />
-                    {!mastered && <div style={{position:'absolute', top:0, left:0, right:0, bottom:0, display:'flex', alignItems:'center', justifyContent:'center', color:'#666', fontSize:'0.8rem', background:'rgba(0,0,0,0.8)', borderRadius:'8px'}}>Waiting for mastering...</div>}
+                    <canvas ref={mastCanvas} width={700} height={180} style={{width:'100%', background:'rgba(0,0,0,0.2)', borderRadius:'8px', display:'block'}} />
+                    {!mastered && <div style={{position:'absolute', top:0, left:0, right:0, bottom:0, display:'flex', alignItems:'center', justifyContent:'center', color:'#666', fontSize:'0.8rem', background:'rgba(0,0,0,0.8)', borderRadius:'8px'}}>No mastered file yet</div>}
                     {mastered && <div style={{position:'absolute', top:0, bottom:0, left:`${mastDuration > 0 ? (mastTime/mastDuration)*100 : 0}%`, width:'2px', background:'#fff', pointerEvents:'none'}} />}
                   </div>
                 </div>
               </div>
 
+              {/* 3. Mastering Controls 영역 */}
               <aside className="controls">
+                
+                {/* Loudness and Safety */}
                 <div className="panel" style={{marginBottom:'20px'}}>
-                  <p className="p-label">ENGINE</p>
+                  <p className="p-label">LOUDNESS AND SAFETY</p>
                   <div className="row">
                     <div style={{display:'flex', justifyContent:'space-between', marginBottom:'8px'}}>
                       <label style={{margin:0}}>Target LUFS</label>
-                      <span style={{fontSize:'0.7rem', color:'var(--acc)', fontFamily:'monospace'}}>{targetLufs} LUFS</span>
+                      <span style={{fontSize:'0.7rem', color:'var(--acc)', fontFamily:'monospace'}}>{targetLufs}</span>
                     </div>
                     <input type="range" min="-24" max="-3" step="0.5" value={targetLufs} onChange={(e)=>setTargetLufs(Number(e.target.value).toFixed(1))} style={{width:'100%'}} />
                   </div>
-                  <div className="row">
+                  <div className="row" style={{marginBottom:0}}>
                     <div style={{display:'flex', justifyContent:'space-between', marginBottom:'8px'}}>
-                      <label style={{margin:0}}>True Peak Level</label>
+                      <label style={{margin:0}}>True Peak Ceiling</label>
                       <span style={{fontSize:'0.7rem', color:'var(--acc)', fontFamily:'monospace'}}>{truePeak} dBTP</span>
                     </div>
                     <input type="range" min="-3" max="0" step="0.1" value={truePeak} onChange={(e)=>setTruePeak(Number(e.target.value).toFixed(1))} style={{width:'100%'}} />
                   </div>
                 </div>
 
+                {/* PRO: Tone Character */}
+                <div className="panel" style={{marginBottom:'20px', borderColor: isPro ? 'var(--brd)' : '#333'}}>
+                  <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'15px'}}>
+                    <p className="p-label" style={{margin:0, color: isPro ? '#888' : '#555'}}>TONE CHARACTER</p>
+                    {!isPro && <span style={{fontSize:'0.6rem', color:'#eab308', border:'1px solid #eab308', padding:'2px 6px', borderRadius:'4px'}}>PRO</span>}
+                  </div>
+                  <div className="row" style={{marginBottom:0}}>
+                    <div style={{display:'flex', justifyContent:'space-between', marginBottom:'8px'}}>
+                      <label style={{margin:0, color: isPro ? '#888' : '#555'}}>Warmth (Analog Saturation)</label>
+                      <span style={{fontSize:'0.7rem', color: isPro ? 'var(--acc)' : '#555', fontFamily:'monospace'}}>{warmth}%</span>
+                    </div>
+                    <input type="range" min="0" max="100" step="1" value={warmth} onChange={(e)=>setWarmth(e.target.value)} disabled={!isPro} style={{width:'100%', opacity: isPro ? 1 : 0.3}} />
+                  </div>
+                </div>
+
+                {/* PRO: Stereo and Space */}
+                <div className="panel" style={{marginBottom:'20px', borderColor: isPro ? 'var(--brd)' : '#333'}}>
+                  <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'15px'}}>
+                    <p className="p-label" style={{margin:0, color: isPro ? '#888' : '#555'}}>STEREO AND SPACE</p>
+                    {!isPro && <span style={{fontSize:'0.6rem', color:'#eab308', border:'1px solid #eab308', padding:'2px 6px', borderRadius:'4px'}}>PRO</span>}
+                  </div>
+                  <div className="row">
+                    <div style={{display:'flex', justifyContent:'space-between', marginBottom:'8px'}}>
+                      <label style={{margin:0, color: isPro ? '#888' : '#555'}}>Stereo Width</label>
+                      <span style={{fontSize:'0.7rem', color: isPro ? 'var(--acc)' : '#555', fontFamily:'monospace'}}>{stereoWidth}%</span>
+                    </div>
+                    <input type="range" min="0" max="200" step="1" value={stereoWidth} onChange={(e)=>setStereoWidth(e.target.value)} disabled={!isPro} style={{width:'100%', opacity: isPro ? 1 : 0.3}} />
+                  </div>
+                  <div className="row" style={{marginBottom:0}}>
+                    <div style={{display:'flex', justifyContent:'space-between', marginBottom:'8px'}}>
+                      <label style={{margin:0, color: isPro ? '#888' : '#555'}}>Mono Bass Anchor</label>
+                      <span style={{fontSize:'0.7rem', color: isPro ? 'var(--acc)' : '#555', fontFamily:'monospace'}}>{monoBass}%</span>
+                    </div>
+                    <input type="range" min="0" max="100" step="1" value={monoBass} onChange={(e)=>setMonoBass(e.target.value)} disabled={!isPro} style={{width:'100%', opacity: isPro ? 1 : 0.3}} />
+                    {isPro && <div style={{fontSize:'0.6rem', color:'#666', marginTop:'4px', textAlign:'right'}}>{monoBass === "0" ? 'Off' : (monoBass === "100" ? '< 60Hz Mono' : '< 30Hz Mono')}</div>}
+                  </div>
+                </div>
+
+                {/* Output Format */}
                 <div className="panel" style={{marginBottom:'20px'}}>
-                  <p className="p-label" style={{marginBottom:'15px'}}>OUTPUT FORMAT</p>
+                  <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'15px'}}>
+                    <p className="p-label" style={{margin:0}}>OUTPUT FORMAT</p>
+                    {!isPro && <span style={{fontSize:'0.6rem', color:'#666', border:'1px solid #444', padding:'2px 6px', borderRadius:'4px'}}>FREE LIMIT</span>}
+                  </div>
                   <div className="row">
                     <label>Format</label>
-                    <select className="ui-select" value={format} onChange={(e)=>setFormat(e.target.value)}>
-                      <option value="wav">WAV</option>
-                      <option value="flac">FLAC</option>
+                    <select className="ui-select" value={effectiveFormat} onChange={(e)=>setFormat(e.target.value)} disabled={!isPro}>
                       <option value="mp3">MP3 (320kbps)</option>
+                      {isPro && <option value="wav">WAV</option>}
+                      {isPro && <option value="flac">FLAC</option>}
                     </select>
+                    {!isPro && <div style={{fontSize:'0.65rem', color:'#eab308', marginTop:'6px'}}>WAV, FLAC is available for PRO</div>}
                   </div>
                   <div className="row">
                     <label>Sample Rate</label>
-                    <select className="ui-select" disabled={isMp3} value={displaySampleRate} onChange={(e)=>setSampleRate(e.target.value)}>
+                    <select className="ui-select" disabled={isMp3 || !isPro} value={displaySampleRate} onChange={(e)=>setSampleRate(e.target.value)}>
                       <option value="44100">44.1 kHz</option>
                       <option value="48000">48 kHz</option>
                       <option value="96000">96 kHz</option>
@@ -286,14 +394,14 @@ export default function Home() {
                   </div>
                   <div className="row" style={{marginBottom:0}}>
                     <label>Bit Depth</label>
-                    <select className="ui-select" disabled={isMp3} value={displayBitDepth} onChange={(e)=>setBitDepth(e.target.value)}>
+                    <select className="ui-select" disabled={isMp3 || !isPro} value={displayBitDepth} onChange={(e)=>setBitDepth(e.target.value)}>
                       <option value="16">16-bit</option>
                       <option value="24">24-bit</option>
                     </select>
                   </div>
                 </div>
 
-                <button onClick={runMastering} className="render-btn" disabled={!file} style={{width:'100%', background:'var(--acc)', color:'#000', border:'none', padding:'18px', borderRadius:'12px', fontWeight:900, cursor:'pointer', transition:'0.2s'}}>START MASTERING</button>
+                <button onClick={runMastering} className="render-btn" disabled={files.length === 0} style={{width:'100%', background:'var(--acc)', color:'#000', border:'none', padding:'18px', borderRadius:'12px', fontWeight:900, cursor:'pointer', transition:'0.2s'}}>START MASTERING</button>
               </aside>
             </div>
           </div>
@@ -316,6 +424,12 @@ export default function Home() {
         .btn-login { background: var(--txt); color: var(--bg); border: none; padding: 18px 48px; border-radius: 50px; font-weight: bold; cursor: pointer; font-size: 1.1rem; }
         .play-btn { background: var(--txt); color: var(--bg); border: none; padding: 5px 12px; border-radius: 6px; font-weight: bold; font-size: 0.7rem; cursor: pointer; }
         .render-btn:disabled { opacity: 0.2; cursor: not-allowed !important; }
+        
+        /* 스크롤바 커스텀 */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg); }
+        ::-webkit-scrollbar-thumb { background: #444; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #666; }
       `}} />
     </main>
   )
