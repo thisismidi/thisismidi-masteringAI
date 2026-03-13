@@ -19,13 +19,12 @@ export default function Home() {
   const [masterAudioUrl, setMasterAudioUrl] = useState<string | null>(null)
   const [mastered, setMastered] = useState(false)
   
-  // 플레이어 상태 (원본)
+  // 플레이어 상태
   const origAudioRef = useRef<HTMLAudioElement>(null)
   const [origIsPlaying, setOrigIsPlaying] = useState(false)
   const [origTime, setOrigTime] = useState(0)
   const [origDuration, setOrigDuration] = useState(0)
 
-  // 플레이어 상태 (마스터)
   const mastAudioRef = useRef<HTMLAudioElement>(null)
   const [mastIsPlaying, setMastIsPlaying] = useState(false)
   const [mastTime, setMastTime] = useState(0)
@@ -68,7 +67,8 @@ export default function Home() {
     return () => subscription.unsubscribe()
   }, [])
 
-  const draw = async (f: File, canvas: HTMLCanvasElement, color: string) => {
+  // 🚨 수정한 부분: 마스터링 파형 변형 시뮬레이션 로직 추가 🚨
+  const draw = async (f: File, canvas: HTMLCanvasElement, color: string, isMaster: boolean = false) => {
     if (typeof window === 'undefined' || !canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
@@ -78,14 +78,28 @@ export default function Home() {
       const data = buffer.getChannelData(0)
       const step = Math.ceil(data.length / canvas.width)
       
+      // 시각적 게인(Gain) 및 리미터(Limiter) 수치 계산
+      // Target LUFS가 0에 가까워질수록(-6 등) 파형이 커짐
+      const visualGain = isMaster ? Math.max(0.5, 1 + (parseFloat(targetLufs) + 14) * 0.15) : 1;
+      // True Peak에 따라 위아래가 잘림 (dB를 Linear로 변환)
+      const tpLimit = isMaster ? Math.pow(10, parseFloat(truePeak) / 20) : 1;
+      
       ctx.clearRect(0, 0, canvas.width, canvas.height)
       ctx.beginPath()
       ctx.strokeStyle = color
       ctx.lineWidth = 1.5
+      
       for (let i = 0; i < canvas.width; i++) {
         let min = 1, max = -1
         for (let j = 0; j < step; j++) {
-          const d = data[i * step + j]
+          let d = data[i * step + j]
+          
+          if (isMaster) {
+            d = d * visualGain // 소리를 키움 (뚱뚱해짐)
+            if (d > tpLimit) d = tpLimit // 천장 깎기
+            if (d < -tpLimit) d = -tpLimit // 바닥 깎기
+          }
+          
           if (d < min) min = d; if (d > max) max = d
         }
         ctx.moveTo(i, (1 + min) * canvas.height / 2)
@@ -106,20 +120,18 @@ export default function Home() {
       setAudioUrl(url)
       setMasterAudioUrl(null)
     } else {
-      setAudioUrl(null)
-      setMasterAudioUrl(null)
+      setAudioUrl(null); setMasterAudioUrl(null)
     }
   }
 
   useEffect(() => {
-    if (file && origCanvas.current) draw(file, origCanvas.current, '#4ade80')
+    // 원본은 시각적 조작 없이 순수하게 그림
+    if (file && origCanvas.current) draw(file, origCanvas.current, '#4ade80', false)
   }, [file, isLightMode])
 
-  // 🚨 수정한 부분: 재마스터링 시 기존 상태 완벽 초기화 🚨
   const runMastering = () => {
     if (!file) return
     
-    // 1. 다시 마스터링 버튼을 누르면 기존 재생 멈춤 및 로딩 화면 띄우기
     setMastered(false)
     setMastTime(0)
     if (mastAudioRef.current) {
@@ -128,10 +140,10 @@ export default function Home() {
       setMastIsPlaying(false)
     }
 
-    // 2. 엔진 처리 딜레이 시뮬레이션 (나중에 실제 백엔드 연동 부분)
     setTimeout(() => {
       setMastered(true)
-      if (mastCanvas.current) draw(file, mastCanvas.current, '#3b82f6')
+      // 마스터링 시뮬레이션 플래그(true)를 넘겨서 파형을 변형시킴
+      if (mastCanvas.current) draw(file, mastCanvas.current, '#3b82f6', true)
       setMasterAudioUrl(audioUrl)
     }, 1500)
   }
@@ -259,7 +271,6 @@ export default function Home() {
 
                 <div className="panel" style={{marginBottom:'20px'}}>
                   <p className="p-label" style={{marginBottom:'15px'}}>OUTPUT FORMAT</p>
-                  
                   <div className="row">
                     <label>Format</label>
                     <select className="ui-select" value={format} onChange={(e)=>setFormat(e.target.value)}>
@@ -268,7 +279,6 @@ export default function Home() {
                       <option value="mp3">MP3 (320kbps)</option>
                     </select>
                   </div>
-                  
                   <div className="row">
                     <label>Sample Rate</label>
                     <select className="ui-select" disabled={isMp3} value={displaySampleRate} onChange={(e)=>setSampleRate(e.target.value)}>
@@ -277,7 +287,6 @@ export default function Home() {
                       <option value="96000">96 kHz</option>
                     </select>
                   </div>
-                  
                   <div className="row" style={{marginBottom:0}}>
                     <label>Bit Depth</label>
                     <select className="ui-select" disabled={isMp3} value={displayBitDepth} onChange={(e)=>setBitDepth(e.target.value)}>
