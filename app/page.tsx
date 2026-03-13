@@ -186,7 +186,6 @@ export default function Home() {
 
       <div className="container" style={{maxWidth:'1000px', margin:'0 auto', padding:'20px'}}>
         <header style={{display:'flex', justifyContent:'space-between', marginBottom:'40px', alignItems:'center'}}>
-          {/* 🚨 사이트 이름 변경 부분 🚨 */}
           <h1 style={{color:'var(--acc)', fontSize:'1.5rem', fontWeight:900, margin:0}}>THISISMIDI <span style={{opacity:0.3}}>.</span></h1>
           <div style={{display:'flex', gap:'10px', alignItems:'center'}}>
             {user && <span style={{fontSize:'0.7rem', color:'#888', marginRight:'10px'}}>TIER: <b style={{color: tier==='DEVELOPER'?'#eab308':'var(--txt)'}}>{tier}</b></span>}
@@ -204,7 +203,6 @@ export default function Home() {
           <div className="dash">
             <section className="panel upload" style={{marginBottom:'20px'}}>
               <input type="file" id="u-file" onChange={handleFileUpload} hidden accept="audio/*" />
-              {/* 🚨 업로드 문구 변경 부분 🚨 */}
               <label htmlFor="u-file" className="dropzone" style={{cursor:'pointer', display:'block', padding:'30px', border:'1px dashed var(--brd)', textAlign:'center', borderRadius:'12px'}}>
                 {file ? <b style={{color:'var(--acc)'}}>{file.name}</b> : "Click to load your audio file (wav, flac)"}
               </label>
@@ -232,9 +230,13 @@ export default function Home() {
                   <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'15px'}}>
                     <p className="p-label" style={{margin:0}}>MASTERED WAVEFORM</p>
                     {mastered && (
-                      <div style={{display:'flex', gap:'15px', alignItems:'center'}}>
-                        <span style={{fontFamily:'monospace', fontSize:'0.75rem', color:'#888', letterSpacing:'1px'}}>{formatTime(mastTime)} / {formatTime(mastDuration)}</span>
+                      <div style={{display:'flex', gap:'10px', alignItems:'center'}}>
+                        <span style={{fontFamily:'monospace', fontSize:'0.75rem', color:'#888', letterSpacing:'1px', marginRight:'5px'}}>{formatTime(mastTime)} / {formatTime(mastDuration)}</span>
                         <button onClick={togglePlayMast} className="play-btn">{mastIsPlaying ? '⏹ STOP' : '▶ PLAY'}</button>
+                        {/* 🚨 추가된 다운로드 버튼 🚨 */}
+                        <a href={masterAudioUrl || '#'} download={`mastered_${file?.name || 'audio'}`} style={{textDecoration:'none'}}>
+                          <button className="play-btn" style={{background:'#3b82f6'}}>⬇ DOWNLOAD</button>
+                        </a>
                       </div>
                     )}
                   </div>
