@@ -115,11 +115,22 @@ export default function Home() {
     if (file && origCanvas.current) draw(file, origCanvas.current, '#4ade80')
   }, [file, isLightMode])
 
+  // 🚨 수정한 부분: 재마스터링 시 기존 상태 완벽 초기화 🚨
   const runMastering = () => {
     if (!file) return
-    setMastered(true)
-    // 현재는 진짜 엔진이 없으므로, 임시로 원본 파일을 마스터 파일인 것처럼 연결하여 플레이어를 테스트합니다.
+    
+    // 1. 다시 마스터링 버튼을 누르면 기존 재생 멈춤 및 로딩 화면 띄우기
+    setMastered(false)
+    setMastTime(0)
+    if (mastAudioRef.current) {
+      mastAudioRef.current.pause()
+      mastAudioRef.current.currentTime = 0
+      setMastIsPlaying(false)
+    }
+
+    // 2. 엔진 처리 딜레이 시뮬레이션 (나중에 실제 백엔드 연동 부분)
     setTimeout(() => {
+      setMastered(true)
       if (mastCanvas.current) draw(file, mastCanvas.current, '#3b82f6')
       setMasterAudioUrl(audioUrl)
     }, 1500)
@@ -127,7 +138,7 @@ export default function Home() {
 
   const togglePlayOrig = () => {
     if (!origAudioRef.current) return
-    if (mastIsPlaying) { mastAudioRef.current?.pause(); setMastIsPlaying(false); } // 마스터 정지
+    if (mastIsPlaying) { mastAudioRef.current?.pause(); setMastIsPlaying(false); } 
     if (origIsPlaying) origAudioRef.current.pause()
     else origAudioRef.current.play()
     setOrigIsPlaying(!origIsPlaying)
@@ -135,7 +146,7 @@ export default function Home() {
 
   const togglePlayMast = () => {
     if (!mastAudioRef.current) return
-    if (origIsPlaying) { origAudioRef.current?.pause(); setOrigIsPlaying(false); } // 원본 정지
+    if (origIsPlaying) { origAudioRef.current?.pause(); setOrigIsPlaying(false); } 
     if (mastIsPlaying) mastAudioRef.current.pause()
     else mastAudioRef.current.play()
     setMastIsPlaying(!mastIsPlaying)
@@ -164,7 +175,6 @@ export default function Home() {
 
   return (
     <main className={isLightMode ? 'light-mode' : 'dark-mode'}>
-      {/* 실제 오디오 플레이어 (숨김) */}
       <audio ref={origAudioRef} src={audioUrl || ''} onTimeUpdate={() => setOrigTime(origAudioRef.current?.currentTime || 0)} onLoadedMetadata={() => setOrigDuration(origAudioRef.current?.duration || 0)} onEnded={() => setOrigIsPlaying(false)} />
       <audio ref={mastAudioRef} src={masterAudioUrl || ''} onTimeUpdate={() => setMastTime(mastAudioRef.current?.currentTime || 0)} onLoadedMetadata={() => setMastDuration(mastAudioRef.current?.duration || 0)} onEnded={() => setMastIsPlaying(false)} />
 
@@ -194,7 +204,6 @@ export default function Home() {
 
             <div className="main-grid" style={{display:'grid', gridTemplateColumns:'1fr 320px', gap:'20px'}}>
               <div className="monitors">
-                {/* 1. 오리지널 웨이브폼 */}
                 <div className="panel" style={{marginBottom:'20px'}}>
                   <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'15px'}}>
                     <p className="p-label" style={{margin:0}}>ORIGINAL WAVEFORM</p>
@@ -211,7 +220,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* 2. 마스터 웨이브폼 */}
                 <div className="panel">
                   <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'15px'}}>
                     <p className="p-label" style={{margin:0}}>MASTERED WAVEFORM</p>
@@ -224,14 +232,13 @@ export default function Home() {
                   </div>
                   <div style={{position:'relative', cursor: mastered ? 'pointer' : 'default'}} onClick={(e) => mastered && handleSeek(e, mastAudioRef, mastDuration, true)}>
                     <canvas ref={mastCanvas} width={700} height={120} style={{width:'100%', background:'rgba(0,0,0,0.2)', borderRadius:'8px', display:'block'}} />
-                    {!mastered && <div style={{position:'absolute', top:0, left:0, right:0, bottom:0, display:'flex', alignItems:'center', justifyContent:'center', color:'#666', fontSize:'0.8rem', background:'rgba(0,0,0,0.5)', borderRadius:'8px'}}>Waiting for mastering...</div>}
+                    {!mastered && <div style={{position:'absolute', top:0, left:0, right:0, bottom:0, display:'flex', alignItems:'center', justifyContent:'center', color:'#666', fontSize:'0.8rem', background:'rgba(0,0,0,0.8)', borderRadius:'8px'}}>Waiting for mastering...</div>}
                     {mastered && <div style={{position:'absolute', top:0, bottom:0, left:`${mastDuration > 0 ? (mastTime/mastDuration)*100 : 0}%`, width:'2px', background:'#fff', pointerEvents:'none'}} />}
                   </div>
                 </div>
               </div>
 
               <aside className="controls">
-                {/* 엔진 설정 패널 */}
                 <div className="panel" style={{marginBottom:'20px'}}>
                   <p className="p-label">ENGINE</p>
                   <div className="row">
@@ -250,7 +257,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* 아웃풋 포맷 패널 (레퍼런스 이미지 반영) */}
                 <div className="panel" style={{marginBottom:'20px'}}>
                   <p className="p-label" style={{marginBottom:'15px'}}>OUTPUT FORMAT</p>
                   
