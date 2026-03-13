@@ -13,7 +13,7 @@ export default function Home() {
   const [tier, setTier] = useState('FREE') 
   const [isLightMode, setIsLightMode] = useState(false)
   
-  // 파일 및 트랙 큐 상태 (최대 15개)
+  // 파일 및 트랙 큐 상태
   const [files, setFiles] = useState<File[]>([])
   const [activeIndex, setActiveIndex] = useState<number>(0)
   
@@ -56,7 +56,7 @@ export default function Home() {
       const { data: { session } } = await supabase.auth.getSession()
       if (session?.user) {
         setUser(session.user)
-        // 🚨 여기에 대표님의 실제 구글 로그인 이메일을 적어주세요!
+        // 🚨 대표님 이메일 세팅 완료!
         if (session.user.email === 'itsfreiar@gmail.com') {
           setTier('DEVELOPER')
         } else {
@@ -104,7 +104,6 @@ export default function Home() {
       
       const visualGain = isMaster ? Math.max(0.5, 1 + (parseFloat(targetLufs) + 14) * 0.15) : 1;
       const tpLimit = isMaster ? Math.pow(10, parseFloat(truePeak) / 20) : 1;
-      // Warmth가 높을수록 파형이 꽉 차보이게(RMS 증가) 시뮬레이션
       const warmthFactor = isMaster && isPro ? 1 + (parseFloat(warmth) * 0.002) : 1;
       
       ctx.clearRect(0, 0, canvas.width, canvas.height)
@@ -133,17 +132,30 @@ export default function Home() {
     } catch (e) { console.error(e) }
   }
 
+  // 🚨 수정한 부분: 티어에 따른 업로드 제한 로직 🚨
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newFiles = Array.from(e.target.files || [])
     if (newFiles.length === 0) return
     
+    if (!isPro) {
+      // FREE 티어는 무조건 1곡만 유지 (덮어쓰기)
+      if (newFiles.length > 1) {
+        alert("FREE 티어는 1곡씩만 작업할 수 있습니다.")
+        return
+      }
+      setFiles([newFiles[0]])
+      setActiveIndex(0)
+      return
+    }
+    
+    // PRO / DEVELOPER 티어는 15곡 유지
     if (files.length + newFiles.length > 15) {
       alert("최대 15곡까지만 업로드할 수 있습니다.")
       return
     }
     
     setFiles(prev => [...prev, ...newFiles])
-    if (files.length === 0) setActiveIndex(0) // 처음 올리면 1번 트랙 자동 선택
+    if (files.length === 0) setActiveIndex(0)
   }
 
   const removeFile = (index: number) => {
@@ -212,7 +224,6 @@ export default function Home() {
     else if (!isMaster && !origIsPlaying) togglePlayOrig()
   }
 
-  // FREE 티어는 무조건 mp3, 아니면 선택값
   const effectiveFormat = isPro ? format : 'mp3'
   const isMp3 = effectiveFormat === 'mp3'
   const displaySampleRate = isMp3 ? '44100' : sampleRate
@@ -244,11 +255,13 @@ export default function Home() {
             <section className="panel" style={{marginBottom:'20px', padding:'0'}}>
               <div style={{padding:'15px 20px', borderBottom:'1px solid var(--brd)', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
                 <h2 style={{fontSize:'0.9rem', margin:0, fontWeight:'bold'}}>Track Queue</h2>
-                <span style={{fontSize:'0.7rem', color:'#888', background:'var(--bg)', padding:'4px 8px', borderRadius:'4px'}}>{files.length} / 15 tracks</span>
+                {/* 🚨 티어에 따라 동적으로 변하는 카운터 🚨 */}
+                <span style={{fontSize:'0.7rem', color:'#888', background:'var(--bg)', padding:'4px 8px', borderRadius:'4px'}}>{files.length} / {isPro ? 15 : 1} tracks</span>
               </div>
               
               <div style={{padding:'20px'}}>
-                <input type="file" id="u-file" onChange={handleFileUpload} hidden accept="audio/*" multiple />
+                {/* 🚨 FREE 유저는 탐색기에서 애초에 다중선택을 못하게 막음 🚨 */}
+                <input type="file" id="u-file" onChange={handleFileUpload} hidden accept="audio/*" multiple={isPro} />
                 <label htmlFor="u-file" className="dropzone" style={{cursor:'pointer', display:'block', padding:'20px', border:'1px dashed var(--brd)', textAlign:'center', borderRadius:'8px', marginBottom:'15px', fontSize:'0.8rem', color:'#888'}}>
                   Drop audio files here (WAV · MP3 · FLAC) or <b style={{color:'var(--acc)'}}>Click to Upload</b>
                 </label>
@@ -312,7 +325,6 @@ export default function Home() {
               {/* 3. Mastering Controls 영역 */}
               <aside className="controls">
                 
-                {/* Loudness and Safety */}
                 <div className="panel" style={{marginBottom:'20px'}}>
                   <p className="p-label">LOUDNESS AND SAFETY</p>
                   <div className="row">
@@ -331,7 +343,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* PRO: Tone Character */}
                 <div className="panel" style={{marginBottom:'20px', borderColor: isPro ? 'var(--brd)' : '#333'}}>
                   <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'15px'}}>
                     <p className="p-label" style={{margin:0, color: isPro ? '#888' : '#555'}}>TONE CHARACTER</p>
@@ -346,7 +357,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* PRO: Stereo and Space */}
                 <div className="panel" style={{marginBottom:'20px', borderColor: isPro ? 'var(--brd)' : '#333'}}>
                   <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'15px'}}>
                     <p className="p-label" style={{margin:0, color: isPro ? '#888' : '#555'}}>STEREO AND SPACE</p>
@@ -369,7 +379,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Output Format */}
                 <div className="panel" style={{marginBottom:'20px'}}>
                   <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'15px'}}>
                     <p className="p-label" style={{margin:0}}>OUTPUT FORMAT</p>
