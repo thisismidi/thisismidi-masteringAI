@@ -21,13 +21,12 @@ export default function Home() {
 
   const [currentOrigUrl, setCurrentOrigUrl] = useState<string>('')
 
-  // 미터링 데이터 (화면 표시용)
+  // 미터링 데이터
   const [origLufs, setOrigLufs] = useState(-70)
   const [origTp, setOrigTp] = useState(-70)
   const [mastLufs, setMastLufs] = useState(-70)
   const [mastTp, setMastTp] = useState(-70)
 
-  // 🚨 [추가] 실시간 평균(Integrated) & 최대 피크 누적을 위한 메모리 저장소
   const origMeterData = useRef({ sum: 0, samples: 0, maxPeak: 0 })
   const mastMeterData = useRef({ sum: 0, samples: 0, maxPeak: 0 })
 
@@ -57,6 +56,14 @@ export default function Home() {
 
   const isPro = tier === 'PRO' || tier === 'DEVELOPER'
 
+  // --- [시간 포맷 변환 함수] ---
+  const formatTime = (time: number) => {
+    if (isNaN(time) || !isFinite(time)) return "00:00"
+    const m = Math.floor(time / 60).toString().padStart(2, '0')
+    const s = Math.floor(time % 60).toString().padStart(2, '0')
+    return `${m}:${s}`
+  }
+
   // --- [인증 및 초기화] ---
   useEffect(() => {
     document.title = "THISISMIDI Mastering AI"
@@ -76,12 +83,10 @@ export default function Home() {
     else setTier('FREE')
   }
 
-  // 트랙 변경 시 URL 생성 및 미터기 초기화
   useEffect(() => {
     if (files[activeIndex]) {
       const url = URL.createObjectURL(files[activeIndex])
       setCurrentOrigUrl(url)
-      // 곡이 바뀌면 미터기 누적 데이터 초기화
       origMeterData.current = { sum: 0, samples: 0, maxPeak: 0 }
       mastMeterData.current = { sum: 0, samples: 0, maxPeak: 0 }
       setOrigLufs(-70); setOrigTp(-70); setMastLufs(-70); setMastTp(-70);
@@ -91,7 +96,7 @@ export default function Home() {
     }
   }, [files, activeIndex])
 
-  // --- [안전한 오디오 엔진 및 배선] ---
+  // --- [오디오 엔진 및 배선] ---
   const ensureAudioRouting = (audio: HTMLAudioElement) => {
     if (!audioCtxRef.current) {
       audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)()
@@ -111,7 +116,6 @@ export default function Home() {
     return sourceNodes.current.get(audio)?.analyzer
   }
 
-  // 🚨 [핵심 변경] 누적 평균(Integrated LUFS) 및 최대값(Max True Peak) 계산 로직
   const startAnalyzing = (audio: HTMLAudioElement, type: 'orig' | 'mast') => {
     const analyzer = ensureAudioRouting(audio)
     if (!analyzer) return
@@ -126,15 +130,10 @@ export default function Home() {
       }
       
       const meter = type === 'orig' ? origMeterData.current : mastMeterData.current
-
-      // 1. 에너지와 샘플 수를 계속 누적 (Integrated LUFS 용)
       meter.sum += sum
       meter.samples += data.length
-
-      // 2. 피크값은 지금까지 나온 것 중 가장 큰 것만 기억 (Max True Peak 용)
       if (peak > meter.maxPeak) meter.maxPeak = peak
 
-      // 수치 계산
       const tp = meter.maxPeak > 0 ? 20 * Math.log10(meter.maxPeak) : -70
       const avgRms = Math.sqrt(meter.sum / meter.samples)
       const lufs = avgRms > 0 ? 20 * Math.log10(avgRms) - 0.691 : -70
@@ -147,7 +146,6 @@ export default function Home() {
     update()
   }
 
-  // 구간 이동 (Seeking) 시 미터기 리셋
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>, audioRef: React.RefObject<HTMLAudioElement>, duration: number, type: 'orig' | 'mast') => {
     if (!audioRef.current || !duration || duration === 0) return
     const rect = e.currentTarget.getBoundingClientRect()
@@ -155,7 +153,6 @@ export default function Home() {
     const targetTime = (clickX / rect.width) * duration
     audioRef.current.currentTime = targetTime
 
-    // 원하는 구간으로 이동하면 해당 트랙의 누적 평균값을 다시 잽니다.
     if (type === 'orig') origMeterData.current = { sum: 0, samples: 0, maxPeak: 0 }
     if (type === 'mast') mastMeterData.current = { sum: 0, samples: 0, maxPeak: 0 }
   }
@@ -193,7 +190,6 @@ export default function Home() {
     }
   }
 
-  // --- [파형 드로잉] ---
   const drawWave = async (file: File | string, canvas: HTMLCanvasElement, color: string) => {
     if (!canvas || !file) return
     const ctx = canvas.getContext('2d')
@@ -231,7 +227,7 @@ export default function Home() {
       const resp = await fetch(ENGINE_URL, { method: "POST", body: formData })
       const blob = await resp.blob(); 
       setMasteredUrls(p => ({ ...p, [activeIndex]: URL.createObjectURL(blob) }))
-      mastMeterData.current = { sum: 0, samples: 0, maxPeak: 0 } // 마스터링 완료 시 미터기 초기화
+      mastMeterData.current = { sum: 0, samples: 0, maxPeak: 0 } 
     } catch (e) { alert("엔진 응답 없음") } finally { setIsProcessing(false) }
   }
 
@@ -281,9 +277,12 @@ export default function Home() {
                   <div className="stats">LUFS: {origLufs}<br/>TP: {origTp}</div>
                   <button onClick={()=>togglePlay('orig')} className="btn-p">{origIsPlaying ? 'STOP' : 'PLAY'}</button>
                 </div>
-                <div className="wave-box" onClick={(e) => handleSeek(e, origAudioRef, origDuration, 'orig')}>
-                  <canvas ref={origCanvas} width={1000} height={140} />
-                  <div className="seeker" style={{left: origDuration > 0 ? `${(origTime/origDuration)*100}%` : '0'}} />
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                  <div className="time-display">{formatTime(origTime)} / {formatTime(origDuration)}</div>
+                  <div className="wave-box" onClick={(e) => handleSeek(e, origAudioRef, origDuration, 'orig')}>
+                    <canvas ref={origCanvas} width={1000} height={140} />
+                    <div className="seeker" style={{left: origDuration > 0 ? `${(origTime/origDuration)*100}%` : '0'}} />
+                  </div>
                 </div>
                 <audio 
                   ref={origAudioRef} 
@@ -303,10 +302,13 @@ export default function Home() {
                     {masteredUrls[activeIndex] && <a href={masteredUrls[activeIndex]} download={`Mastered_${files[activeIndex].name}`} className="btn-p download" style={{textAlign:'center'}}>SAVE</a>}
                   </div>
                 </div>
-                <div className="wave-box" onClick={(e) => handleSeek(e, mastAudioRef, mastDuration, 'mast')}>
-                  <canvas ref={mastCanvas} width={1000} height={140} />
-                  <div className="seeker" style={{left: mastDuration > 0 ? `${(mastTime/mastDuration)*100}%` : '0'}} />
-                  {!masteredUrls[activeIndex] && <div className="no-file-overlay">No mastered file yet</div>}
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                  <div className="time-display">{formatTime(mastTime)} / {formatTime(mastDuration)}</div>
+                  <div className="wave-box" onClick={(e) => handleSeek(e, mastAudioRef, mastDuration, 'mast')}>
+                    <canvas ref={mastCanvas} width={1000} height={140} />
+                    <div className="seeker" style={{left: mastDuration > 0 ? `${(mastTime/mastDuration)*100}%` : '0'}} />
+                    {!masteredUrls[activeIndex] && <div className="no-file-overlay">No mastered file yet</div>}
+                  </div>
                 </div>
                 <audio 
                   ref={mastAudioRef} 
@@ -384,7 +386,8 @@ export default function Home() {
         .btn-p.download { background: #3b82f6; color: #fff; text-decoration: none; }
         .btn-p:disabled { opacity: 0.3; cursor: not-allowed; }
         
-        .wave-box { flex: 1; height: 160px; background: rgba(0,0,0,0.05); border: 1px solid var(--brd); border-radius: 8px; position: relative; overflow: hidden; cursor: pointer; }
+        .time-display { text-align: right; font-size: 0.7rem; font-family: "SF Mono", monospace; color: var(--sec); margin-bottom: 6px; font-weight: bold; }
+        .wave-box { width: 100%; height: 160px; background: rgba(0,0,0,0.05); border: 1px solid var(--brd); border-radius: 8px; position: relative; overflow: hidden; cursor: pointer; }
         canvas { width: 100%; height: 100%; display: block; }
         .seeker { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 10px rgba(255,255,255,0.8); pointer-events: none; }
         .no-file-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.05); display: flex; align-items: center; justify-content: center; font-size: 0.85rem; color: var(--sec); font-weight: 600; }
