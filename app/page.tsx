@@ -39,16 +39,13 @@ export default function Home() {
   const [truePeak, setTruePeak] = useState("-1.0")
   const [outputTrim, setOutputTrim] = useState("0.0")
   
+  // 🚨 [변경] Tone Character: Warmth와 Treble만 남김
   const [warmth, setWarmth] = useState("0")
-  const [clarity, setClarity] = useState("0") 
-  const [air, setAir] = useState("0") 
-  const [lowEndClean, setLowEndClean] = useState("0") 
+  const [treble, setTreble] = useState("0") 
 
   const [stereoWidth, setStereoWidth] = useState("100")
   const [spaceDepth, setSpaceDepth] = useState("0") 
   const [monoBass, setMonoBass] = useState("0")
-  
-  // 🚨 Auto-level 삭제, Glue Comp(Vari-mu) 유지
   const [glueComp, setGlueComp] = useState("0") 
 
   const [outFormat, setOutFormat] = useState("MP3")
@@ -233,15 +230,14 @@ export default function Home() {
     formData.append("true_peak", truePeak)
     formData.append("output_trim", outputTrim)
     
+    // 🚨 백엔드로 전송하는 파라미터 업데이트
     formData.append("warmth", warmth)
-    formData.append("clarity", clarity)
-    formData.append("air", air)
-    formData.append("low_end_clean", lowEndClean)
+    formData.append("treble", treble)
 
     formData.append("stereo_width", stereoWidth)
     formData.append("space_depth", spaceDepth)
     formData.append("mono_bass", monoBass)
-    formData.append("glue_comp", glueComp) // Auto-level 제외
+    formData.append("glue_comp", glueComp)
 
     try {
       const resp = await fetch(ENGINE_URL, { method: "POST", body: formData })
@@ -385,12 +381,11 @@ export default function Home() {
                   <div className="sld-row"><label>Output Trim</label><input type="range" min="-6" max="6" step="0.1" value={outputTrim} onChange={(e)=>setOutputTrim(e.target.value)} disabled={!isPro} /><span>{outputTrim} dB</span></div>
                 </div>
                 
+                {/* 🚨 [변경] Tone Character UI 심플하게 정리 */}
                 <div className="control-group">
                   <p className="g-title">Tone Character</p>
                   <div className="sld-row"><label>Warmth</label><input type="range" min="0" max="100" value={warmth} onChange={(e)=>setWarmth(e.target.value)} disabled={!isPro} /><span>{warmth}%</span></div>
-                  <div className="sld-row"><label>Clarity (De-harsh)</label><input type="range" min="0" max="100" value={clarity} onChange={(e)=>setClarity(e.target.value)} disabled={!isPro} /><span>{clarity}%</span></div>
-                  <div className="sld-row"><label>Air</label><input type="range" min="0" max="100" value={air} onChange={(e)=>setAir(e.target.value)} disabled={!isPro} /><span>{air}%</span></div>
-                  <div className="sld-row"><label>Low-end Clean</label><input type="range" min="0" max="100" value={lowEndClean} onChange={(e)=>setLowEndClean(e.target.value)} disabled={!isPro} /><span>{lowEndClean}%</span></div>
+                  <div className="sld-row"><label>Treble</label><input type="range" min="0" max="100" value={treble} onChange={(e)=>setTreble(e.target.value)} disabled={!isPro} /><span>{treble}%</span></div>
                 </div>
                 
                 <div className="control-group">
