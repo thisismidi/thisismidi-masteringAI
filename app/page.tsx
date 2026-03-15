@@ -1,3 +1,18 @@
+**`next.config.ts`**
+
+```ts
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {};
+
+export default nextConfig;
+```
+
+---
+
+**`app/page.tsx`**
+
+```tsx
 'use client'
 
 import { createClient } from '@supabase/supabase-js'
@@ -61,6 +76,7 @@ export default function Home() {
   const sourceNodes = useRef<Map<HTMLAudioElement, { source: MediaElementAudioSourceNode; analyzer: AnalyserNode }>>(new Map())
   const origRafRef = useRef<number | null>(null)
   const mastRafRef = useRef<number | null>(null)
+  const abTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [currentOrigUrl, setCurrentOrigUrl] = useState('')
   const isPro = tier === 'PRO' || tier === 'DEVELOPER'
@@ -124,9 +140,7 @@ export default function Home() {
     if (!analyzer) return
     const rafRef = type === 'orig' ? origRafRef : mastRafRef
     const meterData = type === 'orig' ? origMeterData : mastMeterData
-
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
-
     const update = () => {
       const data = new Float32Array(analyzer.fftSize)
       analyzer.getFloatTimeDomainData(data)
@@ -138,14 +152,11 @@ export default function Home() {
       meterData.current.sum += sum
       meterData.current.samples += data.length
       if (peak > meterData.current.maxPeak) meterData.current.maxPeak = peak
-
       const tp = meterData.current.maxPeak > 0 ? 20 * Math.log10(meterData.current.maxPeak) : -70
       const avgRms = Math.sqrt(meterData.current.sum / meterData.current.samples)
       const lufs = avgRms > 0 ? 20 * Math.log10(avgRms) - 0.691 : -70
-
       if (type === 'orig') { setOrigLufs(Math.round(lufs * 10) / 10); setOrigTp(Math.round(tp * 10) / 10) }
       else { setMastLufs(Math.round(lufs * 10) / 10); setMastTp(Math.round(tp * 10) / 10) }
-
       rafRef.current = requestAnimationFrame(update)
     }
     update()
@@ -160,7 +171,6 @@ export default function Home() {
     const audio = type === 'orig' ? origAudioRef.current : mastAudioRef.current
     if (!audio) return
     if (audioCtxRef.current?.state === 'suspended') await audioCtxRef.current.resume()
-
     if (type === 'orig') {
       if (origIsPlaying) {
         audio.pause(); stopAnalyzing('orig'); setOrigIsPlaying(false)
@@ -180,8 +190,6 @@ export default function Home() {
     }
   }
 
-  const abTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
   const stopAbSync = useCallback(() => {
     setAbSyncMode(false)
     if (abTimerRef.current) clearTimeout(abTimerRef.current)
@@ -193,7 +201,6 @@ export default function Home() {
     const orig = origAudioRef.current
     const mast = mastAudioRef.current
     if (!orig || !mast) return
-
     if (playingOrig) {
       mast.pause(); stopAnalyzing('mast'); setMastIsPlaying(false)
       orig.currentTime = startTime
@@ -203,7 +210,6 @@ export default function Home() {
       mast.currentTime = startTime
       try { await mast.play(); startAnalyzing(mast, 'mast'); setMastIsPlaying(true) } catch (e) { return }
     }
-
     abTimerRef.current = setTimeout(() => {
       runAbCycle(startTime, !playingOrig)
     }, 3000)
@@ -262,9 +268,15 @@ export default function Home() {
     const file = files[index]
     if (!file) return null
     const fd = new FormData()
-    fd.append("file", file); fd.append("target_lufs", targetLufs); fd.append("true_peak", truePeak)
-    fd.append("warmth", warmth); fd.append("stereo_width", stereoWidth); fd.append("mono_bass", monoBass)
-    fd.append("out_format", outFormat); fd.append("out_sample_rate", outSampleRate); fd.append("out_bit_depth", outBitDepth)
+    fd.append("file", file)
+    fd.append("target_lufs", targetLufs)
+    fd.append("true_peak", truePeak)
+    fd.append("warmth", warmth)
+    fd.append("stereo_width", stereoWidth)
+    fd.append("mono_bass", monoBass)
+    fd.append("out_format", outFormat)
+    fd.append("out_sample_rate", outSampleRate)
+    fd.append("out_bit_depth", outBitDepth)
     const resp = await fetch(ENGINE_URL, { method: "POST", body: fd })
     if (!resp.ok) throw new Error(`Server error ${resp.status}`)
     const blob = await resp.blob()
@@ -429,7 +441,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Original */}
               <div className="monitor-row">
                 <div className="m-controls">
                   <p className="m-label" style={{ color: 'var(--acc)' }}>Original</p>
@@ -459,7 +470,6 @@ export default function Home() {
                   onEnded={() => { stopAnalyzing('orig'); setOrigIsPlaying(false) }} />
               </div>
 
-              {/* Mastered */}
               <div className="monitor-row mt-20">
                 <div className="m-controls">
                   <p className="m-label color-m">Mastered</p>
@@ -656,3 +666,6 @@ export default function Home() {
     </main>
   )
 }
+```
+
+push하고 빌드 다시 확인해봐!
