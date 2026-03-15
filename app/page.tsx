@@ -69,6 +69,12 @@ export default function Home() {
     else setTier('FREE')
   }
 
+  // 곡이 바뀔 때마다 오디오 태그를 새로고침하여 소리 로딩을 강제합니다.
+  useEffect(() => {
+    if(origAudioRef.current) origAudioRef.current.load();
+    if(mastAudioRef.current) mastAudioRef.current.load();
+  }, [activeIndex, files, masteredUrls])
+
   // --- [오디오 엔진: 소리 재생 보장] ---
   const initAudioCtx = () => {
     if (!audioCtxRef.current) {
@@ -88,7 +94,7 @@ export default function Home() {
     const analyzer = ctx.createAnalyser()
     analyzer.fftSize = 2048
     source.connect(analyzer)
-    analyzer.connect(ctx.destination) // 🚨 스피커 연결 (필수)
+    analyzer.connect(ctx.destination) 
 
     const update = () => {
       const data = new Float32Array(analyzer.fftSize)
@@ -110,7 +116,7 @@ export default function Home() {
   const togglePlay = async (type: 'orig' | 'mast') => {
     const audio = type === 'orig' ? origAudioRef.current : mastAudioRef.current
     if (!audio) return
-    initAudioCtx() // 사용자 클릭 시 엔진 깨움
+    initAudioCtx()
 
     if (type === 'orig') {
       if (origIsPlaying) { audio.pause(); if(rafIdRef.current) cancelAnimationFrame(rafIdRef.current); }
@@ -129,7 +135,7 @@ export default function Home() {
     }
   }
 
-  // --- [파형 드로잉 및 구간 이동] ---
+  // --- [파형 드로잉 및 구간 이동 (색상 구분 추가)] ---
   const drawWave = async (file: File | string, canvas: HTMLCanvasElement, color: string) => {
     if (!canvas || !file) return
     const ctx = canvas.getContext('2d')
@@ -140,7 +146,7 @@ export default function Home() {
       const audioBuf = await tCtx.decodeAudioData(buf)
       const data = audioBuf.getChannelData(0)
       ctx.clearRect(0, 0, canvas.width, canvas.height)
-      ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = 1
+      ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = 1.2
       const step = Math.floor(data.length / canvas.width)
       for (let i = 0; i < canvas.width; i++) {
         let min = 1, max = -1
@@ -154,14 +160,14 @@ export default function Home() {
   }
 
   useEffect(() => {
-    if (files[activeIndex] && origCanvas.current) drawWave(files[activeIndex], origCanvas.current, isLightMode ? '#007aff' : '#555')
-    if (masteredUrls[activeIndex] && mastCanvas.current) drawWave(masteredUrls[activeIndex], mastCanvas.current, '#3b82f6')
+    // 🚨 오리지널: 그린(Green) / 마스터: 블루(Blue)로 확실히 구분했습니다.
+    if (files[activeIndex] && origCanvas.current) drawWave(files[activeIndex], origCanvas.current, isLightMode ? '#10b981' : '#4ade80')
+    if (masteredUrls[activeIndex] && mastCanvas.current) drawWave(masteredUrls[activeIndex], mastCanvas.current, isLightMode ? '#2563eb' : '#3b82f6')
   }, [files, activeIndex, isLightMode, masteredUrls])
 
   return (
     <main className={isLightMode ? 'light-mode' : 'dark-mode'}>
       <div className="workspace">
-        {/* Header */}
         <header className="main-header">
           <div className="brand">THISISMIDI <span className="accent">.</span></div>
           <div className="user-area">
@@ -196,7 +202,7 @@ export default function Home() {
               </div>
               <ul className="track-list">
                 {files.map((f, i) => (
-                  <li key={i} className={activeIndex === i ? 'active' : ''} onClick={() => setActiveIndex(i)}>
+                  <li key={i} className={activeIndex === i ? 'active' : ''} onClick={() => { setActiveIndex(i); setOrigIsPlaying(false); setMastIsPlaying(false); }}>
                     <input type="checkbox" checked={activeIndex === i} readOnly />
                     <span className="name">{i+1}. {f.name}</span>
                   </li>
@@ -210,7 +216,7 @@ export default function Home() {
               
               <div className="monitor-row">
                 <div className="m-controls">
-                  <p className="m-label">Original</p>
+                  <p className="m-label" style={{color: 'var(--acc)'}}>Original</p>
                   <div className="stats">LUFS: {origLufs}<br/>TP: {origTp}</div>
                   <button onClick={()=>togglePlay('orig')} className="btn-p">{origIsPlaying ? 'STOP' : 'PLAY'}</button>
                 </div>
@@ -222,7 +228,8 @@ export default function Home() {
                   <canvas ref={origCanvas} width={1000} height={140} />
                   <div className="seeker" style={{left: `${(origTime/origDuration)*100}%`}} />
                 </div>
-                <audio ref={origAudioRef} crossOrigin="anonymous" src={files[activeIndex] ? URL.createObjectURL(files[activeIndex]) : ''} onTimeUpdate={(e)=>setOrigTime(e.currentTarget.currentTime)} onLoadedMetadata={(e)=>setOrigDuration(e.currentTarget.duration)} />
+                {/* 🚨 crossOrigin 속성 삭제: 소리 차단 문제 해결 */}
+                <audio ref={origAudioRef} src={files[activeIndex] ? URL.createObjectURL(files[activeIndex]) : ''} onTimeUpdate={(e)=>setOrigTime(e.currentTarget.currentTime)} onLoadedMetadata={(e)=>setOrigDuration(e.currentTarget.duration)} />
               </div>
 
               <div className="monitor-row mt-20">
@@ -243,7 +250,7 @@ export default function Home() {
                   <div className="seeker" style={{left: `${(mastTime/mastDuration)*100}%` || '0'}} />
                   {!masteredUrls[activeIndex] && <div className="no-file-overlay">No mastered file yet</div>}
                 </div>
-                <audio ref={mastAudioRef} crossOrigin="anonymous" src={masteredUrls[activeIndex] || ''} onTimeUpdate={(e)=>setMastTime(e.currentTarget.currentTime)} onLoadedMetadata={(e)=>setMastDuration(e.currentTarget.duration)} />
+                <audio ref={mastAudioRef} src={masteredUrls[activeIndex] || ''} onTimeUpdate={(e)=>setMastTime(e.currentTarget.currentTime)} onLoadedMetadata={(e)=>setMastDuration(e.currentTarget.duration)} />
               </div>
             </section>
 
@@ -277,12 +284,11 @@ export default function Home() {
 
       <style dangerouslySetInnerHTML={{ __html: `
         :root { --bg: #0d0d0d; --p: #161616; --brd: #262626; --txt: #e5e5e5; --acc: #4ade80; --sec: #888; }
-        .light-mode { --bg: #f5f5f7; --p: #ffffff; --brd: #e5e5e7; --txt: #1d1d1f; --acc: #0071e3; --sec: #86868b; }
+        .light-mode { --bg: #f5f5f7; --p: #ffffff; --brd: #e5e5e7; --txt: #1d1d1f; --acc: #10b981; --sec: #86868b; }
         
         body { margin: 0; background: var(--bg); color: var(--txt); font-family: -apple-system, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
         .workspace { max-width: 1200px; margin: 0 auto; padding: 20px; }
         
-        /* Header */
         .main-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
         .brand { font-size: 1.4rem; font-weight: 900; letter-spacing: -1px; }
         .accent { color: var(--acc); }
@@ -291,7 +297,6 @@ export default function Home() {
         .btn-icon, .btn-text { background: none; border: 1px solid var(--brd); color: var(--txt); padding: 7px 14px; border-radius: 8px; cursor: pointer; font-size: 0.75rem; font-weight: 700; transition: 0.2s; }
         .btn-icon:hover, .btn-text:hover { background: var(--brd); }
         
-        /* 🚨 레이아웃을 세로형(위에서 아래로)으로 완전히 변경 */
         .vertical-layout { display: flex; flex-direction: column; gap: 30px; width: 100%; }
         
         .panel { background: var(--p); border: 1px solid var(--brd); border-radius: 12px; padding: 25px; box-shadow: 0 4px 30px rgba(0,0,0,0.1); }
@@ -299,7 +304,6 @@ export default function Home() {
         .panel-top h3 { font-size: 1rem; margin: 0; font-weight: 800; letter-spacing: -0.5px; }
         .panel-top span { font-size: 0.8rem; color: var(--sec); }
         
-        /* 1. Queue Panel */
         .upload-container { background: rgba(0,0,0,0.05); border: 1px solid var(--brd); border-radius: 8px; padding: 20px; margin-bottom: 15px; }
         .drop-area { display: flex; height: 80px; border: 1px dashed var(--sec); border-radius: 6px; align-items: center; justify-content: center; font-size: 0.85rem; color: var(--sec); margin-bottom: 15px; cursor: pointer; transition: 0.2s; }
         .drop-area:hover { border-color: var(--acc); color: var(--txt); }
@@ -311,7 +315,6 @@ export default function Home() {
         .track-list li { padding: 12px 15px; border-radius: 6px; display: flex; align-items: center; gap: 12px; cursor: pointer; font-size: 0.85rem; border: 1px solid var(--brd); background: rgba(0,0,0,0.02); }
         .track-list li.active { background: rgba(74,222,128,0.1); border-color: var(--acc); }
         
-        /* 2. Monitor Panel */
         .monitor-row { display: flex; gap: 20px; align-items: center; }
         .m-controls { width: 120px; flex-shrink: 0; }
         .m-label { font-size: 0.85rem; font-weight: 800; margin: 0 0 8px 0; }
@@ -326,7 +329,6 @@ export default function Home() {
         .seeker { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 10px rgba(255,255,255,0.8); pointer-events: none; }
         .no-file-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.05); display: flex; align-items: center; justify-content: center; font-size: 0.85rem; color: var(--sec); font-weight: 600; }
         
-        /* 3. Controls Panel */
         .control-groups-wrapper { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 30px; }
         .control-group { background: rgba(0,0,0,0.02); padding: 20px; border-radius: 8px; border: 1px solid var(--brd); }
         .g-title { font-size: 0.85rem; font-weight: 800; margin-bottom: 20px; color: var(--txt); border-bottom: 1px solid var(--brd); padding-bottom: 10px; }
