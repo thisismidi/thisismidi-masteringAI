@@ -2,6 +2,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { useState, useEffect, useRef } from 'react'
+import JSZip from 'jszip' // 🚨 [추가] ZIP 압축 라이브러리
 
 const supabaseUrl = 'https://vjjowuamlwnuagaacind.supabase.co'
 const supabaseKey = 'sb_publishable_6dZKot10ye-Ii1OEw1d_Mg_ZFodzHjE'
@@ -108,7 +109,6 @@ export default function Home() {
     }
   }, [files, activeIndex])
 
-  // 🚨 [추가] 파일 업로드 시 티어에 따른 제한 로직 (1곡 vs 15곡)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(e.target.files || [])
     const limit = isPro ? 15 : 1
@@ -235,14 +235,12 @@ export default function Home() {
     if (masteredUrls[activeIndex] && mastCanvas.current) drawWave(masteredUrls[activeIndex], mastCanvas.current, isLightMode ? '#2563eb' : '#3b82f6') 
   }, [files, activeIndex, isLightMode, masteredUrls])
 
-  // 🚨 [변경] 단일 마스터링에서 전체 큐(Queue) 일괄 마스터링(Batch)으로 업그레이드
   const runBatchMastering = async () => {
     if (files.length === 0) return; 
     setIsProcessing(true);
 
-    // 올라온 곡들을 하나씩 순서대로 백엔드에 요청합니다.
     for (let i = 0; i < files.length; i++) {
-      setActiveIndex(i); // 유저가 작업 진행률을 볼 수 있게 선택 곡을 자동으로 변경
+      setActiveIndex(i); 
       
       const formData = new FormData()
       formData.append("file", files[i])
@@ -253,10 +251,8 @@ export default function Home() {
       formData.append("target_lufs", targetLufs)
       formData.append("true_peak", truePeak)
       formData.append("output_trim", outputTrim)
-      
       formData.append("warmth", warmth)
       formData.append("treble", treble)
-
       formData.append("stereo_width", stereoWidth)
       formData.append("space_depth", spaceDepth)
       formData.append("mono_bass", monoBass)
@@ -273,7 +269,6 @@ export default function Home() {
         alert(`[${files[i].name}] 마스터링 중 오류가 발생했습니다.`)
       }
     }
-    
     setIsProcessing(false);
   }
 
@@ -281,6 +276,36 @@ export default function Home() {
     if (!files[activeIndex]) return 'Mastered.mp3'
     const nameWithoutExt = files[activeIndex].name.split('.').slice(0, -1).join('.')
     return `${nameWithoutExt}_Mastered.${outFormat.toLowerCase()}`
+  }
+
+  // 🚨 [추가] 완료된 모든 곡을 ZIP 파일로 묶어서 다운로드하는 기능
+  const downloadAllAsZip = async () => {
+    const zip = new JSZip()
+    const masteredKeys = Object.keys(masteredUrls)
+    
+    if (masteredKeys.length === 0) return
+
+    for (const key of masteredKeys) {
+      const index = Number(key)
+      const url = masteredUrls[index]
+      const file = files[index]
+      const nameWithoutExt = file.name.split('.').slice(0, -1).join('.')
+      const fileName = `${nameWithoutExt}_Mastered.${outFormat.toLowerCase()}`
+      
+      try {
+        const response = await fetch(url)
+        const blob = await response.blob()
+        zip.file(fileName, blob)
+      } catch (e) {
+        console.error("ZIP 파일 생성 중 오류:", e)
+      }
+    }
+    
+    const content = await zip.generateAsync({ type: 'blob' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(content)
+    link.download = 'THISISMIDI_Mastered_Tracks.zip'
+    link.click()
   }
 
   return (
@@ -303,16 +328,20 @@ export default function Home() {
             <section className="panel queue-panel">
               <div className="panel-top"><h3>Track Queue</h3><span>{files.length} tracks {isPro ? '(Max 15)' : '(Max 1)'}</span></div>
               <div className="upload-container">
-                {/* 🚨 업로드 제한 핸들러 적용 */}
                 <input type="file" id="u-file" hidden multiple onChange={handleFileUpload} accept="audio/*" />
                 <label htmlFor="u-file" className="drop-area">Drop audio files here (WAV, MP3, etc)</label>
                 <div className="action-row">
                   <label htmlFor="u-file" className="btn-sub">UPLOAD</label>
-                  {/* 🚨 곡 갯수에 따라 버튼 텍스트 변경 */}
                   <button onClick={runBatchMastering} className="btn-prime" disabled={isProcessing || files.length === 0}>
                     {isProcessing ? 'PROCESSING...' : (files.length > 1 ? `MASTER ALL ${files.length} TRACKS` : 'START MASTERING')}
                   </button>
                 </div>
+                {/* 🚨 [추가] 마스터링이 2곡 이상 완료되었을 때 나타나는 ZIP 다운로드 버튼 */}
+                {Object.keys(masteredUrls).length > 1 && (
+                  <button onClick={downloadAllAsZip} className="btn-prime zip-btn">
+                    📥 DOWNLOAD ALL AS ZIP
+                  </button>
+                )}
               </div>
               <ul className="track-list">
                 {files.map((f, i) => (
@@ -331,7 +360,8 @@ export default function Home() {
               <div className="monitor-row">
                 <div className="m-controls">
                   <p className="m-label" style={{color: 'var(--acc)'}}>Original</p>
-                  <div className="stats">LUFS: {origLufs}<br/>TP: {origTp}</div>
+                  {/* 🚨 [변경] LUFS -> Integrated 로 용어 수정 */}
+                  <div className="stats">Integrated: {origLufs}<br/>TP: {origTp}</div>
                   <button onClick={()=>togglePlay('orig')} className="btn-p">{origIsPlaying ? 'STOP' : 'PLAY'}</button>
                 </div>
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
@@ -353,7 +383,8 @@ export default function Home() {
               <div className="monitor-row mt-20">
                 <div className="m-controls">
                   <p className="m-label color-m">Mastered</p>
-                  <div className="stats">LUFS: {mastLufs}<br/>TP: {mastTp}</div>
+                  {/* 🚨 [변경] LUFS -> Integrated 로 용어 수정 */}
+                  <div className="stats">Integrated: {mastLufs}<br/>TP: {mastTp}</div>
                   <div style={{display:'flex', flexDirection:'column', gap:'5px'}}>
                     <button onClick={()=>togglePlay('mast')} className="btn-p" disabled={!masteredUrls[activeIndex]}>{mastIsPlaying ? 'STOP' : 'PLAY'}</button>
                     {masteredUrls[activeIndex] && <a href={masteredUrls[activeIndex]} download={getDownloadName()} className="btn-p download" style={{textAlign:'center'}}>DOWNLOAD</a>}
@@ -459,6 +490,7 @@ export default function Home() {
         .drop-area:hover { border-color: var(--acc); color: var(--txt); }
         .action-row { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; }
         .btn-prime { background: var(--acc); color: #000; border: none; padding: 12px; border-radius: 6px; font-weight: 800; cursor: pointer; font-size: 0.9rem; transition: 0.2s; }
+        .zip-btn { margin-top: 10px; width: 100%; background: #3b82f6; color: #fff; }
         .btn-sub { background: var(--txt); color: var(--bg); border: none; padding: 12px; border-radius: 6px; font-weight: 800; cursor: pointer; text-align: center; font-size: 0.9rem; display: block; }
         .track-list { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
         .track-list li { padding: 12px 15px; border-radius: 6px; display: flex; align-items: center; gap: 12px; cursor: pointer; font-size: 0.85rem; border: 1px solid var(--brd); background: rgba(0,0,0,0.02); }
