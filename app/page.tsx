@@ -19,14 +19,17 @@ export default function Home() {
   const [activeIndex, setActiveIndex] = useState<number>(0)
   const [isProcessing, setIsProcessing] = useState(false)
 
-  // 🚨 [핵심 해결 1] 안정적인 오디오 URL 상태 (무한 새로고침 방지)
   const [currentOrigUrl, setCurrentOrigUrl] = useState<string>('')
 
-  // 미터링 데이터
+  // 미터링 데이터 (화면 표시용)
   const [origLufs, setOrigLufs] = useState(-70)
   const [origTp, setOrigTp] = useState(-70)
   const [mastLufs, setMastLufs] = useState(-70)
   const [mastTp, setMastTp] = useState(-70)
+
+  // 🚨 [추가] 실시간 평균(Integrated) & 최대 피크 누적을 위한 메모리 저장소
+  const origMeterData = useRef({ sum: 0, samples: 0, maxPeak: 0 })
+  const mastMeterData = useRef({ sum: 0, samples: 0, maxPeak: 0 })
 
   // 재생 상태
   const [origTime, setOrigTime] = useState(0)
@@ -73,12 +76,16 @@ export default function Home() {
     else setTier('FREE')
   }
 
-  // 🚨 [핵심 해결 2] 파일이 바뀔 때만 URL을 1번만 생성합니다. (오디오 끊김 원천 차단)
+  // 트랙 변경 시 URL 생성 및 미터기 초기화
   useEffect(() => {
     if (files[activeIndex]) {
       const url = URL.createObjectURL(files[activeIndex])
       setCurrentOrigUrl(url)
-      return () => URL.revokeObjectURL(url) // 메모리 누수 방지
+      // 곡이 바뀌면 미터기 누적 데이터 초기화
+      origMeterData.current = { sum: 0, samples: 0, maxPeak: 0 }
+      mastMeterData.current = { sum: 0, samples: 0, maxPeak: 0 }
+      setOrigLufs(-70); setOrigTp(-70); setMastLufs(-70); setMastTp(-70);
+      return () => URL.revokeObjectURL(url) 
     } else {
       setCurrentOrigUrl('')
     }
@@ -97,13 +104,14 @@ export default function Home() {
         const analyzer = ctx.createAnalyser()
         analyzer.fftSize = 2048
         source.connect(analyzer)
-        analyzer.connect(ctx.destination) // 스피커로 확실하게 연결
+        analyzer.connect(ctx.destination) 
         sourceNodes.current.set(audio, { source, analyzer })
       } catch (e) { console.error("Audio routing error:", e) }
     }
     return sourceNodes.current.get(audio)?.analyzer
   }
 
+  // 🚨 [핵심 변경] 누적 평균(Integrated LUFS) 및 최대값(Max True Peak) 계산 로직
   const startAnalyzing = (audio: HTMLAudioElement, type: 'orig' | 'mast') => {
     const analyzer = ensureAudioRouting(audio)
     if (!analyzer) return
@@ -116,8 +124,20 @@ export default function Home() {
         const v = Math.abs(data[i]); if (v > peak) peak = v
         sum += data[i] * data[i]
       }
-      const tp = peak > 0 ? 20 * Math.log10(peak) : -70
-      const lufs = (Math.sqrt(sum / data.length) > 0) ? 20 * Math.log10(Math.sqrt(sum / data.length)) - 0.691 : -70
+      
+      const meter = type === 'orig' ? origMeterData.current : mastMeterData.current
+
+      // 1. 에너지와 샘플 수를 계속 누적 (Integrated LUFS 용)
+      meter.sum += sum
+      meter.samples += data.length
+
+      // 2. 피크값은 지금까지 나온 것 중 가장 큰 것만 기억 (Max True Peak 용)
+      if (peak > meter.maxPeak) meter.maxPeak = peak
+
+      // 수치 계산
+      const tp = meter.maxPeak > 0 ? 20 * Math.log10(meter.maxPeak) : -70
+      const avgRms = Math.sqrt(meter.sum / meter.samples)
+      const lufs = avgRms > 0 ? 20 * Math.log10(avgRms) - 0.691 : -70
       
       if (type === 'orig') { setOrigLufs(Math.round(lufs * 10) / 10); setOrigTp(Math.round(tp * 10) / 10); }
       else { setMastLufs(Math.round(lufs * 10) / 10); setMastTp(Math.round(tp * 10) / 10); }
@@ -127,21 +147,23 @@ export default function Home() {
     update()
   }
 
-  // 🚨 [핵심 해결 3] 재생 및 구간 이동 완벽 동기화
-  const handleSeek = (e: React.MouseEvent<HTMLDivElement>, audioRef: React.RefObject<HTMLAudioElement>, duration: number) => {
+  // 구간 이동 (Seeking) 시 미터기 리셋
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>, audioRef: React.RefObject<HTMLAudioElement>, duration: number, type: 'orig' | 'mast') => {
     if (!audioRef.current || !duration || duration === 0) return
     const rect = e.currentTarget.getBoundingClientRect()
-    // 브라우저에 따라 오차가 생기는걸 막기 위해 offsetX 사용
     const clickX = e.nativeEvent.offsetX
     const targetTime = (clickX / rect.width) * duration
     audioRef.current.currentTime = targetTime
+
+    // 원하는 구간으로 이동하면 해당 트랙의 누적 평균값을 다시 잽니다.
+    if (type === 'orig') origMeterData.current = { sum: 0, samples: 0, maxPeak: 0 }
+    if (type === 'mast') mastMeterData.current = { sum: 0, samples: 0, maxPeak: 0 }
   }
 
   const togglePlay = async (type: 'orig' | 'mast') => {
     const audio = type === 'orig' ? origAudioRef.current : mastAudioRef.current
     if (!audio) return
 
-    // Web Audio API 깨우기
     if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
       await audioCtxRef.current.resume()
     }
@@ -150,7 +172,6 @@ export default function Home() {
       if (origIsPlaying) { 
         audio.pause(); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); 
       } else { 
-        // 다른 트랙 정지
         mastAudioRef.current?.pause(); setMastIsPlaying(false);
         try {
           await audio.play()
@@ -162,7 +183,6 @@ export default function Home() {
       if (mastIsPlaying) { 
         audio.pause(); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); 
       } else { 
-        // 다른 트랙 정지
         origAudioRef.current?.pause(); setOrigIsPlaying(false);
         try {
           await audio.play()
@@ -198,8 +218,8 @@ export default function Home() {
   }
 
   useEffect(() => {
-    if (files[activeIndex] && origCanvas.current) drawWave(files[activeIndex], origCanvas.current, isLightMode ? '#10b981' : '#4ade80') // Green
-    if (masteredUrls[activeIndex] && mastCanvas.current) drawWave(masteredUrls[activeIndex], mastCanvas.current, isLightMode ? '#2563eb' : '#3b82f6') // Blue
+    if (files[activeIndex] && origCanvas.current) drawWave(files[activeIndex], origCanvas.current, isLightMode ? '#10b981' : '#4ade80') 
+    if (masteredUrls[activeIndex] && mastCanvas.current) drawWave(masteredUrls[activeIndex], mastCanvas.current, isLightMode ? '#2563eb' : '#3b82f6') 
   }, [files, activeIndex, isLightMode, masteredUrls])
 
   const runMastering = async () => {
@@ -211,6 +231,7 @@ export default function Home() {
       const resp = await fetch(ENGINE_URL, { method: "POST", body: formData })
       const blob = await resp.blob(); 
       setMasteredUrls(p => ({ ...p, [activeIndex]: URL.createObjectURL(blob) }))
+      mastMeterData.current = { sum: 0, samples: 0, maxPeak: 0 } // 마스터링 완료 시 미터기 초기화
     } catch (e) { alert("엔진 응답 없음") } finally { setIsProcessing(false) }
   }
 
@@ -260,7 +281,7 @@ export default function Home() {
                   <div className="stats">LUFS: {origLufs}<br/>TP: {origTp}</div>
                   <button onClick={()=>togglePlay('orig')} className="btn-p">{origIsPlaying ? 'STOP' : 'PLAY'}</button>
                 </div>
-                <div className="wave-box" onClick={(e) => handleSeek(e, origAudioRef, origDuration)}>
+                <div className="wave-box" onClick={(e) => handleSeek(e, origAudioRef, origDuration, 'orig')}>
                   <canvas ref={origCanvas} width={1000} height={140} />
                   <div className="seeker" style={{left: origDuration > 0 ? `${(origTime/origDuration)*100}%` : '0'}} />
                 </div>
@@ -282,7 +303,7 @@ export default function Home() {
                     {masteredUrls[activeIndex] && <a href={masteredUrls[activeIndex]} download={`Mastered_${files[activeIndex].name}`} className="btn-p download" style={{textAlign:'center'}}>SAVE</a>}
                   </div>
                 </div>
-                <div className="wave-box" onClick={(e) => handleSeek(e, mastAudioRef, mastDuration)}>
+                <div className="wave-box" onClick={(e) => handleSeek(e, mastAudioRef, mastDuration, 'mast')}>
                   <canvas ref={mastCanvas} width={1000} height={140} />
                   <div className="seeker" style={{left: mastDuration > 0 ? `${(mastTime/mastDuration)*100}%` : '0'}} />
                   {!masteredUrls[activeIndex] && <div className="no-file-overlay">No mastered file yet</div>}
