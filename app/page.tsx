@@ -3,175 +3,137 @@
 import { createClient } from '@supabase/supabase-js'
 import { useState, useEffect, useRef } from 'react'
 
-// 1. Supabase 연동 (대표님 정보로 변경)
+// 1. Supabase 설정
 const supabaseUrl = 'https://vjjowuamlwnuagaacind.supabase.co'
 const supabaseKey = 'sb_publishable_6dZKot10ye-Ii1OEw1d_Mg_ZFodzHjE'
 const supabase = createClient(supabaseUrl, supabaseKey)
+
+// 엔진 주소 (허깅페이스 Direct URL)
+const ENGINE_URL = "https://thisismidi-thisismidi-mastering-engine.hf.space/master"
 
 export default function Home() {
   const [user, setUser] = useState<any>(null)
   const [tier, setTier] = useState('FREE') 
   const [isLightMode, setIsLightMode] = useState(false)
   
-  // 파일 및 트랙 큐 상태
+  // 파일 및 결과 저장소 (1번 기능: 여러 곡 관리)
   const [files, setFiles] = useState<File[]>([])
+  const [masteredUrls, setMasteredUrls] = useState<{[key: number]: string}>({}) // 인덱스별 결과물 저장
   const [activeIndex, setActiveIndex] = useState<number>(0)
-  
-  const [audioUrl, setAudioUrl] = useState<string | null>(null)
-  const [masterAudioUrl, setMasterAudioUrl] = useState<string | null>(null)
-  const [mastered, setMastered] = useState(false)
-  const [isProcessing, setIsProcessing] = useState(false) // 🚨 로딩 상태 추가!
-  
-  // 플레이어 상태
-  const origAudioRef = useRef<HTMLAudioElement>(null)
-  const [origIsPlaying, setOrigIsPlaying] = useState(false)
+  const [isProcessing, setIsProcessing] = useState(false)
+
+  // 플레이어 및 시각화 상태 (3번 기능: 실시간 정보)
   const [origTime, setOrigTime] = useState(0)
-  const [origDuration, setOrigDuration] = useState(0)
-
-  const mastAudioRef = useRef<HTMLAudioElement>(null)
-  const [mastIsPlaying, setMastIsPlaying] = useState(false)
   const [mastTime, setMastTime] = useState(0)
-  const [mastDuration, setMastDuration] = useState(0)
+  const [origDb, setOrigDb] = useState(-100)
+  const [mastDb, setMastDb] = useState(-100)
+  const [origIsPlaying, setOrigIsPlaying] = useState(false)
+  const [mastIsPlaying, setMastIsPlaying] = useState(false)
 
+  const origAudioRef = useRef<HTMLAudioElement>(null)
+  const mastAudioRef = useRef<HTMLAudioElement>(null)
   const origCanvas = useRef<HTMLCanvasElement>(null)
   const mastCanvas = useRef<HTMLCanvasElement>(null)
+  
+  // Web Audio API 분석용 Ref
+  const audioCtxRef = useRef<AudioContext | null>(null)
+  const analyzerRef = useRef<AnalyserNode | null>(null)
+  const rafIdRef = useRef<number | null>(null)
 
-  // 엔진 파라미터 상태
+  // 엔진 파라미터
   const [targetLufs, setTargetLufs] = useState("-14.0")
   const [truePeak, setTruePeak] = useState("-1.0")
-  
-  // PRO 파라미터 상태
-  const [warmth, setWarmth] = useState("0") 
-  const [stereoWidth, setStereoWidth] = useState("100") 
-  const [monoBass, setMonoBass] = useState("0") 
-  
-  // 아웃풋 포맷 상태
-  const [format, setFormat] = useState('mp3') 
-  const [sampleRate, setSampleRate] = useState('44100')
-  const [bitDepth, setBitDepth] = useState('16')
-
   const isPro = tier === 'PRO' || tier === 'DEVELOPER'
 
+  // --- [로그인 및 세션 관리] ---
   useEffect(() => {
     const init = async () => {
       const { data: { session } } = await supabase.auth.getSession()
       if (session?.user) {
         setUser(session.user)
-        if (session.user.email === 'itsfreiar@gmail.com') {
-          setTier('DEVELOPER')
-        } else {
-          setTier('FREE')
-        }
+        setTier(session.user.email === 'itsfreiar@gmail.com' ? 'DEVELOPER' : 'FREE')
       }
     }
     init()
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, s) => {
-      setUser(s?.user ?? null)
-      if (!s) { 
-        setFiles([]); setActiveIndex(0); setAudioUrl(null); setMasterAudioUrl(null); 
-        setOrigIsPlaying(false); setMastIsPlaying(false); 
-      }
-    })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, s) => setUser(s?.user ?? null))
     return () => subscription.unsubscribe()
   }, [])
 
-  useEffect(() => {
-    if (files.length > 0 && files[activeIndex]) {
-      const url = URL.createObjectURL(files[activeIndex])
-      setAudioUrl(url)
-      setMasterAudioUrl(null)
-      setMastered(false)
-      setOrigIsPlaying(false)
-      setMastIsPlaying(false)
-      return () => URL.revokeObjectURL(url)
-    } else {
-      setAudioUrl(null)
-      setMasterAudioUrl(null)
-    }
-  }, [activeIndex, files])
+  // --- [실시간 미터링 로직 (3번)] ---
+  const startMetering = (audioElement: HTMLAudioElement, type: 'orig' | 'mast') => {
+    if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)()
+    const ctx = audioCtxRef.current
+    if (ctx.state === 'suspended') ctx.resume()
 
-  // 🚨 파형 그리는 함수 (이제 시뮬레이션을 쓰지 않고 진짜 데이터를 그립니다)
-  const draw = async (f: File, canvas: HTMLCanvasElement, color: string) => {
-    if (typeof window === 'undefined' || !canvas) return
+    const analyzer = ctx.createAnalyser()
+    analyzer.fftSize = 256
+    const source = ctx.createMediaElementSource(audioElement)
+    source.connect(analyzer)
+    analyzer.connect(ctx.destination)
+    analyzerRef.current = analyzer
+
+    const bufferLength = analyzer.frequencyBinCount
+    const dataArray = new Uint8Array(bufferLength)
+
+    const update = () => {
+      analyzer.getByteTimeDomainData(dataArray)
+      let sumSquares = 0
+      for (let i = 0; i < bufferLength; i++) {
+        const norm = (dataArray[i] - 128) / 128
+        sumSquares += norm * norm
+      }
+      const rms = Math.sqrt(sumSquares / bufferLength)
+      const db = rms > 0 ? 20 * Math.log10(rms) : -100
+      
+      if (type === 'orig') setOrigDb(Math.round(db * 10) / 10)
+      else setMastDb(Math.round(db * 10) / 10)
+      
+      rafIdRef.current = requestAnimationFrame(update)
+    }
+    update()
+  }
+
+  const stopMetering = () => {
+    if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current)
+    setOrigDb(-100); setMastDb(-100)
+  }
+
+  // --- [파형 그리기 및 재생바 (3번)] ---
+  const drawWaveform = async (url: string, canvas: HTMLCanvasElement, color: string, currentTime: number) => {
+    if (!canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-    try {
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)()
-      const buffer = await audioCtx.decodeAudioData(await f.arrayBuffer())
-      const data = buffer.getChannelData(0)
-      const step = Math.ceil(data.length / canvas.width)
-      
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-      ctx.beginPath()
-      ctx.strokeStyle = color
-      ctx.lineWidth = 1.5
-      
-      for (let i = 0; i < canvas.width; i++) {
-        let min = 1, max = -1
-        for (let j = 0; j < step; j++) {
-          let d = data[i * step + j]
-          if (d < min) min = d; if (d > max) max = d
-        }
-        ctx.moveTo(i, (1 + min) * canvas.height / 2)
-        ctx.lineTo(i, (1 + max) * canvas.height / 2)
-      }
-      ctx.stroke()
-      await audioCtx.close()
-    } catch (e) { console.error(e) }
+
+    // 1. 파형 데이터 로드 및 그리기 (기존 로직 최적화)
+    const resp = await fetch(url)
+    const arrayBuffer = await resp.arrayBuffer()
+    const audioCtx = new AudioContext()
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer)
+    const rawData = audioBuffer.getChannelData(0)
+    const samples = 1000
+    const blockSize = Math.floor(rawData.length / samples)
+    const filteredData = []
+    for (let i = 0; i < samples; i++) filteredData.push(Math.abs(rawData[i * blockSize]))
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    ctx.fillStyle = color
+    filteredData.forEach((val, i) => {
+      const height = val * canvas.height * 0.8
+      ctx.fillRect(i * (canvas.width / samples), (canvas.height - height) / 2, 1.5, height)
+    })
+
+    // 2. 하얀색 재생 바 그리기 (3번 기능의 핵심)
+    const duration = audioBuffer.duration
+    const x = (currentTime / duration) * canvas.width
+    ctx.fillStyle = '#FFFFFF'
+    ctx.fillRect(x, 0, 2, canvas.height)
+    await audioCtx.close()
   }
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newFiles = Array.from(e.target.files || [])
-    if (newFiles.length === 0) return
-    
-    if (!isPro) {
-      if (newFiles.length > 1) {
-        alert("FREE 티어는 1곡씩만 작업할 수 있습니다.")
-        return
-      }
-      setFiles([newFiles[0]])
-      setActiveIndex(0)
-      return
-    }
-    
-    if (files.length + newFiles.length > 15) {
-      alert("최대 15곡까지만 업로드할 수 있습니다.")
-      return
-    }
-    
-    setFiles(prev => [...prev, ...newFiles])
-    if (files.length === 0) setActiveIndex(0)
-  }
-
-  const removeFile = (index: number) => {
-    const newFiles = [...files]
-    newFiles.splice(index, 1)
-    setFiles(newFiles)
-    if (activeIndex >= newFiles.length) {
-      setActiveIndex(Math.max(0, newFiles.length - 1))
-    }
-  }
-
-  useEffect(() => {
-    if (files[activeIndex] && origCanvas.current) {
-      draw(files[activeIndex], origCanvas.current, '#4ade80')
-    }
-  }, [files, activeIndex, isLightMode])
-
-  // 🚨 핵심: 백엔드 서버로 데이터를 전송하는 진짜 마스터링 로직 🚨
+  // --- [마스터링 실행 (1번 통합)] ---
   const runMastering = async () => {
     if (files.length === 0) return
-    
-    setIsProcessing(true) // 버튼 로딩 중...
-    setMastered(false)
-    setMastTime(0)
-    if (mastAudioRef.current) {
-      mastAudioRef.current.pause()
-      mastAudioRef.current.currentTime = 0
-      setMastIsPlaying(false)
-    }
-
+    setIsProcessing(true)
     const currentFile = files[activeIndex]
     const formData = new FormData()
     formData.append("file", currentFile)
@@ -179,291 +141,129 @@ export default function Home() {
     formData.append("true_peak", truePeak)
     
     try {
-      // 🚀 대표님 컴퓨터(로컬)의 8000번 포트로 데이터 쏘기!
-      const response = await fetch("https://thisismidi-thisismidi-mastering-engine.hf.space/master", {
-        method: "POST",
-        body: formData,
-      })
-
-      if (!response.ok) {
-        throw new Error("서버 에러가 발생했습니다.")
-      }
-
-      // 📥 완성된 오디오 데이터 받기
+      const response = await fetch('https://thisismidi-thisismidi-mastering-engine.hf.space/master', { method: "POST", body: formData })
+      if (!response.ok) throw new Error("Engine Error")
       const blob = await response.blob()
-      const newAudioUrl = URL.createObjectURL(blob)
+      const url = URL.createObjectURL(blob)
       
-      setMasterAudioUrl(newAudioUrl)
-      setMastered(true)
+      // 해당 인덱스에 결과물 저장 (1번 기능)
+      setMasteredUrls(prev => ({ ...prev, [activeIndex]: url }))
       setIsProcessing(false)
-
-      // 🎨 시뮬레이션이 아닌, 백엔드가 보내준 진짜 마스터링 파일로 파란색 파형을 그림!
-      if (mastCanvas.current) {
-        const masteredFile = new File([blob], `mastered_${currentFile.name}`, { type: "audio/wav" })
-        draw(masteredFile, mastCanvas.current, '#3b82f6')
-      }
-
     } catch (error) {
-      console.error(error)
-      alert("마스터링 서버에 연결할 수 없습니다. 터미널에서 백엔드 서버가 켜져 있는지 확인해주세요!")
+      alert("마스터링 실패. 파일이나 서버를 확인해주세요.")
       setIsProcessing(false)
     }
   }
 
-  const togglePlayOrig = () => {
-    if (!origAudioRef.current) return
-    if (mastIsPlaying) { mastAudioRef.current?.pause(); setMastIsPlaying(false); } 
-    if (origIsPlaying) origAudioRef.current.pause()
-    else origAudioRef.current.play()
-    setOrigIsPlaying(!origIsPlaying)
+  // --- [곡 변경 및 재생 제어] ---
+  const handleFileClick = (index: number) => {
+    stopMetering()
+    setOrigIsPlaying(false); setMastIsPlaying(false)
+    setActiveIndex(index)
   }
 
-  const togglePlayMast = () => {
-    if (!mastAudioRef.current) return
-    if (origIsPlaying) { origAudioRef.current?.pause(); setOrigIsPlaying(false); } 
-    if (mastIsPlaying) mastAudioRef.current.pause()
-    else mastAudioRef.current.play()
-    setMastIsPlaying(!mastIsPlaying)
-  }
+  const togglePlay = (type: 'orig' | 'mast') => {
+    const audio = type === 'orig' ? origAudioRef.current : mastAudioRef.current
+    if (!audio) return
 
-  const formatTime = (time: number) => {
-    if (!time || isNaN(time)) return "0:00"
-    const m = Math.floor(time / 60)
-    const s = Math.floor(time % 60)
-    return `${m}:${s.toString().padStart(2, '0')}`
+    if (type === 'orig') {
+      if (origIsPlaying) { audio.pause(); stopMetering(); }
+      else { audio.play(); startMetering(audio, 'orig'); mastAudioRef.current?.pause(); setMastIsPlaying(false); }
+      setOrigIsPlaying(!origIsPlaying)
+    } else {
+      if (mastIsPlaying) { audio.pause(); stopMetering(); }
+      else { audio.play(); startMetering(audio, 'mast'); origAudioRef.current?.pause(); setOrigIsPlaying(false); }
+      setMastIsPlaying(!mastIsPlaying)
+    }
   }
-
-  const handleSeek = (e: React.MouseEvent<HTMLDivElement>, ref: React.RefObject<HTMLAudioElement>, duration: number, isMaster: boolean) => {
-    if (!ref.current || !duration) return
-    const rect = e.currentTarget.getBoundingClientRect()
-    const percent = (e.clientX - rect.left) / rect.width
-    ref.current.currentTime = percent * duration
-    
-    if (isMaster && !mastIsPlaying) togglePlayMast()
-    else if (!isMaster && !origIsPlaying) togglePlayOrig()
-  }
-
-  const effectiveFormat = isPro ? format : 'mp3'
-  const isMp3 = effectiveFormat === 'mp3'
-  const displaySampleRate = isMp3 ? '44100' : sampleRate
-  const displayBitDepth = isMp3 ? '16' : bitDepth
 
   return (
     <main className={isLightMode ? 'light-mode' : 'dark-mode'}>
-      <audio ref={origAudioRef} src={audioUrl || ''} onTimeUpdate={() => setOrigTime(origAudioRef.current?.currentTime || 0)} onLoadedMetadata={() => setOrigDuration(origAudioRef.current?.duration || 0)} onEnded={() => setOrigIsPlaying(false)} />
-      <audio ref={mastAudioRef} src={masterAudioUrl || ''} onTimeUpdate={() => setMastTime(mastAudioRef.current?.currentTime || 0)} onLoadedMetadata={() => setMastDuration(mastAudioRef.current?.duration || 0)} onEnded={() => setMastIsPlaying(false)} />
+      <header className="header">
+        <h1 className="logo">THISISMIDI <span className="dot">.</span></h1>
+        <div className="header-right">
+          <button onClick={() => setIsLightMode(!isLightMode)} className="btn-ui">{isLightMode ? 'DARK' : 'LIGHT'}</button>
+          {user ? <button onClick={() => supabase.auth.signOut()} className="btn-ui">LOGOUT</button> : <button onClick={() => supabase.auth.signInWithOAuth({provider:'google'})} className="btn-ui">LOGIN</button>}
+        </div>
+      </header>
 
-      <div className="container" style={{maxWidth:'1200px', margin:'0 auto', padding:'20px'}}>
-        <header style={{display:'flex', justifyContent:'space-between', marginBottom:'40px', alignItems:'center'}}>
-          <h1 style={{color:'var(--acc)', fontSize:'1.5rem', fontWeight:900, margin:0}}>THISISMIDI <span style={{opacity:0.3}}>.</span></h1>
-          <div style={{display:'flex', gap:'10px', alignItems:'center'}}>
-            {user && <span style={{fontSize:'0.7rem', color:'#888', marginRight:'10px'}}>TIER: <b style={{color: tier==='DEVELOPER'?'#eab308':(tier==='PRO'?'#3b82f6':'var(--txt)')}}>{tier}</b></span>}
-            <button onClick={() => setIsLightMode(!isLightMode)} className="btn-ui">{isLightMode ? 'DARK' : 'LIGHT'}</button>
-            {user && <button onClick={() => supabase.auth.signOut()} className="btn-ui">LOGOUT</button>}
-          </div>
-        </header>
+      <div className="container">
+        {/* Track Queue (1번 기능: 여러 곡 리스트) */}
+        <section className="panel queue">
+          <h3>Track Queue ({files.length} / {isPro ? 15 : 1})</h3>
+          <input type="file" id="u-file" hidden accept="audio/*" multiple={isPro} onChange={(e) => setFiles(Array.from(e.target.files || []))} />
+          <label htmlFor="u-file" className="dropzone">Click or Drop Audio Files</label>
+          <ul className="file-list">
+            {files.map((f, i) => (
+              <li key={i} className={activeIndex === i ? 'active' : ''} onClick={() => handleFileClick(i)}>
+                <span>{i + 1}. {f.name}</span>
+                {masteredUrls[i] && <span className="badge-done">DONE</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
 
-        {!user ? (
-          <div style={{textAlign:'center', padding:'100px 0'}}>
-            <h1 style={{fontSize:'3.5rem', letterSpacing:'-2px', marginBottom:'20px', fontWeight:900}}>Mastering, <br/>Redefined.</h1>
-            <button onClick={() => supabase.auth.signInWithOAuth({provider:'google'})} className="btn-login">Start with Google</button>
-          </div>
-        ) : (
-          <div className="dash">
-            {/* 1. Track Queue 영역 (+ START 버튼) */}
-            <section className="panel" style={{marginBottom:'20px', padding:'0'}}>
-              <div style={{padding:'15px 20px', borderBottom:'1px solid var(--brd)', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
-                <h2 style={{fontSize:'0.9rem', margin:0, fontWeight:'bold'}}>Track Queue</h2>
-                <span style={{fontSize:'0.7rem', color:'#888', background:'var(--bg)', padding:'4px 8px', borderRadius:'4px'}}>{files.length} / {isPro ? 15 : 1} tracks</span>
+        <div className="main-grid">
+          {/* Waveform & Meters (3번 기능: 시각화) */}
+          <section className="visualizer">
+            <div className="panel">
+              <div className="panel-header">
+                <p>ORIGINAL {origIsPlaying && <span className="meter-val">{origDb} dB</span>}</p>
+                <button onClick={() => togglePlay('orig')} className="btn-play">{origIsPlaying ? 'STOP' : 'PLAY'}</button>
               </div>
-              
-              <div style={{padding:'20px'}}>
-                <input type="file" id="u-file" onChange={handleFileUpload} hidden accept="audio/*" multiple={isPro} />
-                <label htmlFor="u-file" className="dropzone" style={{cursor:'pointer', display:'block', padding:'20px', border:'1px dashed var(--brd)', textAlign:'center', borderRadius:'8px', marginBottom: files.length > 0 ? '15px' : '0', fontSize:'0.8rem', color:'#888'}}>
-                  Drop audio files here (WAV · MP3 · FLAC) or <b style={{color:'var(--acc)'}}>Click to Upload</b>
-                </label>
-                
-                {files.length > 0 && (
-                  <ul style={{listStyle:'none', margin:0, padding:0, maxHeight:'200px', overflowY:'auto'}}>
-                    {files.map((f, i) => (
-                      <li key={i} onClick={() => setActiveIndex(i)} style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'10px 15px', background: activeIndex === i ? 'rgba(74,222,128,0.1)' : 'transparent', border:'1px solid', borderColor: activeIndex === i ? 'var(--acc)' : 'transparent', borderRadius:'6px', cursor:'pointer', marginBottom:'5px', transition:'0.2s'}}>
-                        <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
-                          <div style={{width:'12px', height:'12px', borderRadius:'50%', background: activeIndex === i ? 'var(--acc)' : '#444'}}></div>
-                          <span style={{fontSize:'0.85rem', color: activeIndex === i ? 'var(--acc)' : 'var(--txt)'}}>{(i+1).toString().padStart(2, '0')}. {f.name}</span>
-                        </div>
-                        <button onClick={(e) => { e.stopPropagation(); removeFile(i); }} style={{background:'none', border:'none', color:'#666', cursor:'pointer', fontSize:'1rem'}}>🗑</button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                
-                <button 
-                  onClick={runMastering} 
-                  className="render-btn" 
-                  disabled={files.length === 0 || isProcessing} 
-                  style={{width:'100%', background: isProcessing ? '#444' : 'var(--acc)', color: isProcessing ? '#fff' : '#000', border:'none', padding:'18px', borderRadius:'12px', fontWeight:900, cursor:'pointer', transition:'0.2s', marginTop:'20px'}}>
-                  {isProcessing ? 'PROCESSING AUDIO...' : 'START MASTERING'}
-                </button>
-              </div>
-            </section>
-
-            <div className="main-grid" style={{display:'grid', gridTemplateColumns:'1fr 340px', gap:'20px'}}>
-              {/* 2. A/B Monitor 영역 */}
-              <div className="monitors">
-                <div className="panel" style={{marginBottom:'20px'}}>
-                  <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'15px'}}>
-                    <p className="p-label" style={{margin:0}}>ORIGINAL WAVEFORM</p>
-                    {files.length > 0 && (
-                      <div style={{display:'flex', gap:'15px', alignItems:'center'}}>
-                        <span style={{fontFamily:'monospace', fontSize:'0.75rem', color:'#888', letterSpacing:'1px'}}>{formatTime(origTime)} / {formatTime(origDuration)}</span>
-                        <button onClick={togglePlayOrig} className="play-btn">{origIsPlaying ? '⏹ STOP' : '▶ PLAY'}</button>
-                      </div>
-                    )}
-                  </div>
-                  <div style={{position:'relative', cursor: files.length > 0 ? 'pointer' : 'default'}} onClick={(e) => files.length > 0 && handleSeek(e, origAudioRef, origDuration, false)}>
-                    <canvas ref={origCanvas} width={700} height={180} style={{width:'100%', background:'rgba(0,0,0,0.2)', borderRadius:'8px', display:'block'}} />
-                    {files.length > 0 && <div style={{position:'absolute', top:0, bottom:0, left:`${origDuration > 0 ? (origTime/origDuration)*100 : 0}%`, width:'2px', background:'#fff', pointerEvents:'none'}} />}
-                  </div>
-                </div>
-
-                <div className="panel">
-                  <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'15px'}}>
-                    <p className="p-label" style={{margin:0}}>MASTERED WAVEFORM</p>
-                    {mastered && (
-                      <div style={{display:'flex', gap:'10px', alignItems:'center'}}>
-                        <span style={{fontFamily:'monospace', fontSize:'0.75rem', color:'#888', letterSpacing:'1px', marginRight:'5px'}}>{formatTime(mastTime)} / {formatTime(mastDuration)}</span>
-                        <button onClick={togglePlayMast} className="play-btn">{mastIsPlaying ? '⏹ STOP' : '▶ PLAY'}</button>
-                        <a href={masterAudioUrl || '#'} download={`MASTERED_${files[activeIndex]?.name || 'audio.wav'}`} style={{textDecoration:'none'}}>
-                          <button className="play-btn" style={{background:'#3b82f6'}}>⬇ DOWNLOAD</button>
-                        </a>
-                      </div>
-                    )}
-                  </div>
-                  <div style={{position:'relative', cursor: mastered ? 'pointer' : 'default'}} onClick={(e) => mastered && handleSeek(e, mastAudioRef, mastDuration, true)}>
-                    <canvas ref={mastCanvas} width={700} height={180} style={{width:'100%', background:'rgba(0,0,0,0.2)', borderRadius:'8px', display:'block'}} />
-                    {!mastered && <div style={{position:'absolute', top:0, left:0, right:0, bottom:0, display:'flex', alignItems:'center', justifyContent:'center', color:'#666', fontSize:'0.8rem', background:'rgba(0,0,0,0.8)', borderRadius:'8px'}}>{isProcessing ? 'Mastering in progress...' : 'No mastered file yet'}</div>}
-                    {mastered && <div style={{position:'absolute', top:0, bottom:0, left:`${mastDuration > 0 ? (mastTime/mastDuration)*100 : 0}%`, width:'2px', background:'#fff', pointerEvents:'none'}} />}
-                  </div>
-                </div>
-              </div>
-
-              {/* 3. Mastering Controls 영역 */}
-              <aside className="controls">
-                
-                <div className="panel" style={{marginBottom:'20px'}}>
-                  <p className="p-label">LOUDNESS AND SAFETY</p>
-                  <div className="row">
-                    <div style={{display:'flex', justifyContent:'space-between', marginBottom:'8px'}}>
-                      <label style={{margin:0}}>Target LUFS</label>
-                      <span style={{fontSize:'0.7rem', color:'var(--acc)', fontFamily:'monospace'}}>{targetLufs}</span>
-                    </div>
-                    <input type="range" min="-24" max="-3" step="0.5" value={targetLufs} onChange={(e)=>setTargetLufs(Number(e.target.value).toFixed(1))} style={{width:'100%'}} />
-                  </div>
-                  <div className="row" style={{marginBottom:0}}>
-                    <div style={{display:'flex', justifyContent:'space-between', marginBottom:'8px'}}>
-                      <label style={{margin:0}}>True Peak Ceiling</label>
-                      <span style={{fontSize:'0.7rem', color:'var(--acc)', fontFamily:'monospace'}}>{truePeak} dBTP</span>
-                    </div>
-                    <input type="range" min="-3" max="0" step="0.1" value={truePeak} onChange={(e)=>setTruePeak(Number(e.target.value).toFixed(1))} style={{width:'100%'}} />
-                  </div>
-                </div>
-
-                <div className="panel" style={{marginBottom:'20px', borderColor: isPro ? 'var(--brd)' : '#333'}}>
-                  <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'15px'}}>
-                    <p className="p-label" style={{margin:0, color: isPro ? '#888' : '#555'}}>TONE CHARACTER</p>
-                    {!isPro && <span style={{fontSize:'0.6rem', color:'#eab308', border:'1px solid #eab308', padding:'2px 6px', borderRadius:'4px'}}>PRO</span>}
-                  </div>
-                  <div className="row" style={{marginBottom:0}}>
-                    <div style={{display:'flex', justifyContent:'space-between', marginBottom:'8px'}}>
-                      <label style={{margin:0, color: isPro ? '#888' : '#555'}}>Warmth (Analog Saturation)</label>
-                      <span style={{fontSize:'0.7rem', color: isPro ? 'var(--acc)' : '#555', fontFamily:'monospace'}}>{warmth}%</span>
-                    </div>
-                    <input type="range" min="0" max="100" step="1" value={warmth} onChange={(e)=>setWarmth(e.target.value)} disabled={!isPro} style={{width:'100%', opacity: isPro ? 1 : 0.3}} />
-                  </div>
-                </div>
-
-                <div className="panel" style={{marginBottom:'20px', borderColor: isPro ? 'var(--brd)' : '#333'}}>
-                  <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'15px'}}>
-                    <p className="p-label" style={{margin:0, color: isPro ? '#888' : '#555'}}>STEREO AND SPACE</p>
-                    {!isPro && <span style={{fontSize:'0.6rem', color:'#eab308', border:'1px solid #eab308', padding:'2px 6px', borderRadius:'4px'}}>PRO</span>}
-                  </div>
-                  <div className="row">
-                    <div style={{display:'flex', justifyContent:'space-between', marginBottom:'8px'}}>
-                      <label style={{margin:0, color: isPro ? '#888' : '#555'}}>Stereo Width</label>
-                      <span style={{fontSize:'0.7rem', color: isPro ? 'var(--acc)' : '#555', fontFamily:'monospace'}}>{stereoWidth}%</span>
-                    </div>
-                    <input type="range" min="0" max="200" step="1" value={stereoWidth} onChange={(e)=>setStereoWidth(e.target.value)} disabled={!isPro} style={{width:'100%', opacity: isPro ? 1 : 0.3}} />
-                  </div>
-                  <div className="row" style={{marginBottom:0}}>
-                    <div style={{display:'flex', justifyContent:'space-between', marginBottom:'8px'}}>
-                      <label style={{margin:0, color: isPro ? '#888' : '#555'}}>Mono Bass Anchor</label>
-                      <span style={{fontSize:'0.7rem', color: isPro ? 'var(--acc)' : '#555', fontFamily:'monospace'}}>{monoBass}%</span>
-                    </div>
-                    <input type="range" min="0" max="100" step="1" value={monoBass} onChange={(e)=>setMonoBass(e.target.value)} disabled={!isPro} style={{width:'100%', opacity: isPro ? 1 : 0.3}} />
-                    {isPro && <div style={{fontSize:'0.6rem', color:'#666', marginTop:'4px', textAlign:'right'}}>{monoBass === "0" ? 'Off' : (monoBass === "100" ? '< 60Hz Mono' : '< 30Hz Mono')}</div>}
-                  </div>
-                </div>
-
-                <div className="panel" style={{marginBottom:'20px'}}>
-                  <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'15px'}}>
-                    <p className="p-label" style={{margin:0}}>OUTPUT FORMAT</p>
-                    {!isPro && <span style={{fontSize:'0.6rem', color:'#666', border:'1px solid #444', padding:'2px 6px', borderRadius:'4px'}}>FREE LIMIT</span>}
-                  </div>
-                  <div className="row">
-                    <label>Format</label>
-                    <select className="ui-select" value={effectiveFormat} onChange={(e)=>setFormat(e.target.value)} disabled={!isPro}>
-                      <option value="mp3">MP3 (320kbps)</option>
-                      {isPro && <option value="wav">WAV</option>}
-                      {isPro && <option value="flac">FLAC</option>}
-                    </select>
-                    {!isPro && <div style={{fontSize:'0.65rem', color:'#eab308', marginTop:'6px'}}>WAV, FLAC is available for PRO</div>}
-                  </div>
-                  <div className="row">
-                    <label>Sample Rate</label>
-                    <select className="ui-select" disabled={isMp3 || !isPro} value={displaySampleRate} onChange={(e)=>setSampleRate(e.target.value)}>
-                      <option value="44100">44.1 kHz</option>
-                      <option value="48000">48 kHz</option>
-                      <option value="96000">96 kHz</option>
-                    </select>
-                  </div>
-                  <div className="row" style={{marginBottom:0}}>
-                    <label>Bit Depth</label>
-                    <select className="ui-select" disabled={isMp3 || !isPro} value={displayBitDepth} onChange={(e)=>setBitDepth(e.target.value)}>
-                      <option value="16">16-bit</option>
-                      <option value="24">24-bit</option>
-                    </select>
-                  </div>
-                </div>
-
-              </aside>
+              <canvas ref={origCanvas} width={800} height={150} onClick={() => drawWaveform(URL.createObjectURL(files[activeIndex]), origCanvas.current!, '#4ade80', origTime)} />
+              <audio ref={origAudioRef} src={files[activeIndex] ? URL.createObjectURL(files[activeIndex]) : ''} onTimeUpdate={(e) => setOrigTime(e.currentTarget.currentTime)} />
             </div>
-          </div>
-        )}
+
+            <div className="panel">
+              <div className="panel-header">
+                <p>MASTERED {mastIsPlaying && <span className="meter-val" style={{color:'#3b82f6'}}>{mastDb} dB</span>}</p>
+                <button onClick={() => togglePlay('mast')} className="btn-play" disabled={!masteredUrls[activeIndex]}>PLAY</button>
+              </div>
+              <canvas ref={mastCanvas} width={800} height={150} />
+              <audio ref={mastAudioRef} src={masteredUrls[activeIndex] || ''} onTimeUpdate={(e) => setMastTime(e.currentTarget.currentTime)} />
+              {masteredUrls[activeIndex] && <a href={masteredUrls[activeIndex]} download={`Mastered_${files[activeIndex].name}`} className="btn-download">DOWNLOAD WAV</a>}
+            </div>
+          </section>
+
+          {/* Controls */}
+          <aside className="controls panel">
+            <p className="p-label">MASTERING SETTINGS</p>
+            <div className="row">
+              <label>Target LUFS: {targetLufs}</label>
+              <input type="range" min="-24" max="-6" step="0.5" value={targetLufs} onChange={(e) => setTargetLufs(e.target.value)} />
+            </div>
+            <div className="row">
+              <label>True Peak: {truePeak} dB</label>
+              <input type="range" min="-3" max="0" step="0.1" value={truePeak} onChange={(e) => setTruePeak(e.target.value)} />
+            </div>
+            <button onClick={runMastering} className="btn-main" disabled={isProcessing || files.length === 0}>
+              {isProcessing ? 'PROCESSING...' : 'START MASTERING'}
+            </button>
+          </aside>
+        </div>
       </div>
-      <style dangerouslySetInnerHTML={{ __html: `
+
+      <style jsx>{`
         :root { --bg: #0b0b0b; --p: #161616; --brd: #2a2a2a; --txt: #fff; --acc: #4ade80; }
-        .light-mode { --bg: #f5f5f7; --p: #fff; --brd: #d2d2d7; --txt: #1c1c1e; --acc: #0071e3; }
-        body { margin: 0; background: var(--bg); color: var(--txt); font-family: -apple-system, sans-serif; transition: 0.2s; }
+        .dark-mode { background: var(--bg); color: var(--txt); }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; display: grid; grid-template-rows: auto 1fr; gap: 20px; }
+        .header { display: flex; justify-content: space-between; padding: 20px 40px; align-items: center; }
+        .logo { font-weight: 900; color: var(--acc); }
         .panel { background: var(--p); border: 1px solid var(--brd); border-radius: 12px; padding: 20px; }
-        .p-label { font-size: 0.65rem; font-weight: bold; color: #888; letter-spacing: 0.5px; }
-        .row { margin-bottom: 20px; } .row label { display: block; font-size: 0.75rem; color: #888; margin-bottom: 8px; }
-        
-        input[type="range"] { accent-color: var(--acc); cursor: pointer; height: 4px; }
-        .ui-select { width: 100%; padding: 10px; background: #000; color: #fff; border: 1px solid var(--brd); border-radius: 6px; font-size: 0.8rem; outline: none; appearance: auto; }
-        .ui-select:disabled { opacity: 0.5; cursor: not-allowed; }
-        
-        .btn-ui { background: none; border: 1px solid var(--brd); color: var(--txt); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 0.7rem; font-weight: bold; transition: 0.2s; }
-        .btn-ui:hover { border-color: var(--txt); }
-        .btn-login { background: var(--txt); color: var(--bg); border: none; padding: 18px 48px; border-radius: 50px; font-weight: bold; cursor: pointer; font-size: 1.1rem; }
-        .play-btn { background: var(--txt); color: var(--bg); border: none; padding: 5px 12px; border-radius: 6px; font-weight: bold; font-size: 0.7rem; cursor: pointer; }
-        .render-btn:disabled { opacity: 0.2; cursor: not-allowed !important; }
-        
-        /* 스크롤바 커스텀 */
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: var(--bg); }
-        ::-webkit-scrollbar-thumb { background: #444; border-radius: 10px; }
-        ::-webkit-scrollbar-thumb:hover { background: #666; }
-      `}} />
+        .main-grid { display: grid; grid-template-columns: 1fr 300px; gap: 20px; }
+        .dropzone { display: block; padding: 30px; border: 2px dashed var(--brd); text-align: center; border-radius: 10px; cursor: pointer; color: #666; }
+        .file-list { list-style: none; padding: 0; margin-top: 20px; }
+        .file-list li { padding: 12px; border-bottom: 1px solid #222; cursor: pointer; display: flex; justify-content: space-between; }
+        .file-list li.active { background: #222; color: var(--acc); border-left: 3px solid var(--acc); }
+        .badge-done { font-size: 0.6rem; background: var(--acc); color: #000; padding: 2px 6px; border-radius: 4px; font-weight: bold; }
+        .btn-play { background: #fff; color: #000; border: none; padding: 6px 15px; border-radius: 6px; font-weight: bold; cursor: pointer; }
+        .meter-val { font-family: monospace; margin-left: 15px; color: var(--acc); font-weight: bold; }
+        canvas { width: 100%; background: #000; border-radius: 8px; margin: 10px 0; }
+        .btn-main { width: 100%; padding: 20px; background: var(--acc); border: none; border-radius: 10px; font-weight: 900; cursor: pointer; }
+        .btn-main:disabled { opacity: 0.3; }
+        .btn-download { display: block; text-align: center; background: #3b82f6; color: #fff; padding: 10px; border-radius: 6px; text-decoration: none; font-weight: bold; margin-top: 10px; }
+      `}</style>
     </main>
   )
 }
