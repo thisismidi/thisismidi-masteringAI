@@ -10,6 +10,8 @@ const nextConfig = {
     }
     return config;
   },
+  // 🚨 Next.js 16 터보팩 빌드 에러 우회용 설정 추가
+  turbopack: {},
 };
 
 export default nextConfig;
