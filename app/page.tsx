@@ -13,15 +13,12 @@ export default function Home() {
   const [tier, setTier] = useState('FREE')
   const [isLightMode, setIsLightMode] = useState(false)
 
-  // 파일 및 상태 관리
   const [files, setFiles] = useState<File[]>([])
   const [masteredUrls, setMasteredUrls] = useState<{[key: number]: string}>({})
   const [activeIndex, setActiveIndex] = useState<number>(0)
   const [isProcessing, setIsProcessing] = useState(false)
-
   const [currentOrigUrl, setCurrentOrigUrl] = useState<string>('')
 
-  // 미터링 데이터
   const [origLufs, setOrigLufs] = useState(-70)
   const [origTp, setOrigTp] = useState(-70)
   const [mastLufs, setMastLufs] = useState(-70)
@@ -30,7 +27,6 @@ export default function Home() {
   const origMeterData = useRef({ sum: 0, samples: 0, maxPeak: 0 })
   const mastMeterData = useRef({ sum: 0, samples: 0, maxPeak: 0 })
 
-  // 재생 상태
   const [origTime, setOrigTime] = useState(0)
   const [mastTime, setMastTime] = useState(0)
   const [origDuration, setOrigDuration] = useState(0)
@@ -38,14 +34,23 @@ export default function Home() {
   const [origIsPlaying, setOrigIsPlaying] = useState(false)
   const [mastIsPlaying, setMastIsPlaying] = useState(false)
 
-  // 마스터링 컨트롤 파라미터
+  // 🎛️ 마스터링 파라미터
   const [targetLufs, setTargetLufs] = useState("-14.0")
   const [truePeak, setTruePeak] = useState("-1.0")
+  const [outputTrim, setOutputTrim] = useState("0.0")
+  
   const [warmth, setWarmth] = useState("0")
-  const [stereoWidth, setStereoWidth] = useState("100")
-  const [monoBass, setMonoBass] = useState("0")
+  const [clarity, setClarity] = useState("0") 
+  const [air, setAir] = useState("0") 
+  const [lowEndClean, setLowEndClean] = useState("0") 
 
-  // 아웃풋 포맷 파라미터
+  const [stereoWidth, setStereoWidth] = useState("100")
+  const [spaceDepth, setSpaceDepth] = useState("0") 
+  const [monoBass, setMonoBass] = useState("0")
+  
+  // 🚨 Auto-level 삭제, Glue Comp(Vari-mu) 유지
+  const [glueComp, setGlueComp] = useState("0") 
+
   const [outFormat, setOutFormat] = useState("MP3")
   const [outSampleRate, setOutSampleRate] = useState("44100")
   const [outBitDepth, setOutBitDepth] = useState("16")
@@ -61,7 +66,6 @@ export default function Home() {
 
   const isPro = tier === 'PRO' || tier === 'DEVELOPER'
 
-  // --- [시간 포맷 변환 함수] ---
   const formatTime = (time: number) => {
     if (isNaN(time) || !isFinite(time)) return "00:00"
     const m = Math.floor(time / 60).toString().padStart(2, '0')
@@ -69,7 +73,6 @@ export default function Home() {
     return `${m}:${s}`
   }
 
-  // --- [인증 및 초기화] ---
   useEffect(() => {
     document.title = "THISISMIDI Mastering AI"
     const init = async () => {
@@ -94,9 +97,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!isPro) {
-      setOutFormat("MP3")
-      setOutSampleRate("44100")
-      setOutBitDepth("16")
+      setOutFormat("MP3"); setOutSampleRate("44100"); setOutBitDepth("16")
     }
   }, [isPro])
 
@@ -113,13 +114,11 @@ export default function Home() {
     }
   }, [files, activeIndex])
 
-  // --- [오디오 엔진 및 배선] ---
   const ensureAudioRouting = (audio: HTMLAudioElement) => {
     if (!audioCtxRef.current) {
       audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)()
     }
     const ctx = audioCtxRef.current
-
     if (!sourceNodes.current.has(audio)) {
       try {
         const source = ctx.createMediaElementSource(audio)
@@ -128,7 +127,7 @@ export default function Home() {
         source.connect(analyzer)
         analyzer.connect(ctx.destination) 
         sourceNodes.current.set(audio, { source, analyzer })
-      } catch (e) { console.error("Audio routing error:", e) }
+      } catch (e) { console.error(e) }
     }
     return sourceNodes.current.get(audio)?.analyzer
   }
@@ -136,7 +135,6 @@ export default function Home() {
   const startAnalyzing = (audio: HTMLAudioElement, type: 'orig' | 'mast') => {
     const analyzer = ensureAudioRouting(audio)
     if (!analyzer) return
-
     const update = () => {
       const data = new Float32Array(analyzer.fftSize)
       analyzer.getFloatTimeDomainData(data)
@@ -145,7 +143,6 @@ export default function Home() {
         const v = Math.abs(data[i]); if (v > peak) peak = v
         sum += data[i] * data[i]
       }
-      
       const meter = type === 'orig' ? origMeterData.current : mastMeterData.current
       meter.sum += sum
       meter.samples += data.length
@@ -163,7 +160,6 @@ export default function Home() {
     update()
   }
 
-  // 🚨 [Vercel 에러 해결] audioRef 매개변수에 '| null' 타입을 명시적으로 추가했습니다!
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>, audioRef: React.RefObject<HTMLAudioElement | null>, duration: number, type: 'orig' | 'mast') => {
     if (!audioRef || !audioRef.current || !duration || duration === 0) return
     const rect = e.currentTarget.getBoundingClientRect()
@@ -178,31 +174,20 @@ export default function Home() {
   const togglePlay = async (type: 'orig' | 'mast') => {
     const audio = type === 'orig' ? origAudioRef.current : mastAudioRef.current
     if (!audio) return
-
-    if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
-      await audioCtxRef.current.resume()
-    }
+    if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') await audioCtxRef.current.resume()
 
     if (type === 'orig') {
-      if (origIsPlaying) { 
-        audio.pause(); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); 
-      } else { 
+      if (origIsPlaying) { audio.pause(); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); } 
+      else { 
         mastAudioRef.current?.pause(); setMastIsPlaying(false);
-        try {
-          await audio.play()
-          startAnalyzing(audio, 'orig')
-        } catch (e) { console.error("Playback failed:", e) }
+        try { await audio.play(); startAnalyzing(audio, 'orig') } catch (e) { console.error(e) }
       }
       setOrigIsPlaying(!origIsPlaying)
     } else {
-      if (mastIsPlaying) { 
-        audio.pause(); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); 
-      } else { 
+      if (mastIsPlaying) { audio.pause(); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); } 
+      else { 
         origAudioRef.current?.pause(); setOrigIsPlaying(false);
-        try {
-          await audio.play()
-          startAnalyzing(audio, 'mast')
-        } catch (e) { console.error("Playback failed:", e) }
+        try { await audio.play(); startAnalyzing(audio, 'mast') } catch (e) { console.error(e) }
       }
       setMastIsPlaying(!mastIsPlaying)
     }
@@ -239,11 +224,24 @@ export default function Home() {
   const runMastering = async () => {
     if (files.length === 0) return; setIsProcessing(true)
     const formData = new FormData()
-    formData.append("file", files[activeIndex]); formData.append("target_lufs", targetLufs); formData.append("true_peak", truePeak)
-    formData.append("warmth", warmth); formData.append("stereo_width", stereoWidth); formData.append("mono_bass", monoBass)
-    formData.append("out_format", outFormat); 
-    formData.append("out_sample_rate", outSampleRate); 
-    formData.append("out_bit_depth", outBitDepth);
+    formData.append("file", files[activeIndex])
+    formData.append("out_format", outFormat) 
+    formData.append("out_sample_rate", outSampleRate) 
+    formData.append("out_bit_depth", outBitDepth)
+
+    formData.append("target_lufs", targetLufs)
+    formData.append("true_peak", truePeak)
+    formData.append("output_trim", outputTrim)
+    
+    formData.append("warmth", warmth)
+    formData.append("clarity", clarity)
+    formData.append("air", air)
+    formData.append("low_end_clean", lowEndClean)
+
+    formData.append("stereo_width", stereoWidth)
+    formData.append("space_depth", spaceDepth)
+    formData.append("mono_bass", monoBass)
+    formData.append("glue_comp", glueComp) // Auto-level 제외
 
     try {
       const resp = await fetch(ENGINE_URL, { method: "POST", body: formData })
@@ -384,17 +382,23 @@ export default function Home() {
                   <p className="g-title">Loudness and Safety</p>
                   <div className="sld-row"><label>Target LUFS</label><input type="range" min="-24" max="-6" step="0.5" value={targetLufs} onChange={(e)=>setTargetLufs(e.target.value)} /><span>{targetLufs}</span></div>
                   <div className="sld-row"><label>True Peak Ceiling</label><input type="range" min="-3" max="0" step="0.1" value={truePeak} onChange={(e)=>setTruePeak(e.target.value)} /><span>{truePeak} dBTP</span></div>
+                  <div className="sld-row"><label>Output Trim</label><input type="range" min="-6" max="6" step="0.1" value={outputTrim} onChange={(e)=>setOutputTrim(e.target.value)} disabled={!isPro} /><span>{outputTrim} dB</span></div>
                 </div>
                 
                 <div className="control-group">
                   <p className="g-title">Tone Character</p>
                   <div className="sld-row"><label>Warmth</label><input type="range" min="0" max="100" value={warmth} onChange={(e)=>setWarmth(e.target.value)} disabled={!isPro} /><span>{warmth}%</span></div>
+                  <div className="sld-row"><label>Clarity (De-harsh)</label><input type="range" min="0" max="100" value={clarity} onChange={(e)=>setClarity(e.target.value)} disabled={!isPro} /><span>{clarity}%</span></div>
+                  <div className="sld-row"><label>Air</label><input type="range" min="0" max="100" value={air} onChange={(e)=>setAir(e.target.value)} disabled={!isPro} /><span>{air}%</span></div>
+                  <div className="sld-row"><label>Low-end Clean</label><input type="range" min="0" max="100" value={lowEndClean} onChange={(e)=>setLowEndClean(e.target.value)} disabled={!isPro} /><span>{lowEndClean}%</span></div>
                 </div>
                 
                 <div className="control-group">
-                  <p className="g-title">Stereo and Space</p>
+                  <p className="g-title">Stereo, Space & Dynamics</p>
                   <div className="sld-row"><label>Stereo Width</label><input type="range" min="0" max="200" value={stereoWidth} onChange={(e)=>setStereoWidth(e.target.value)} disabled={!isPro} /><span>{stereoWidth}%</span></div>
+                  <div className="sld-row"><label>Space Depth</label><input type="range" min="0" max="100" value={spaceDepth} onChange={(e)=>setSpaceDepth(e.target.value)} disabled={!isPro} /><span>{spaceDepth}%</span></div>
                   <div className="sld-row"><label>Mono Bass Anchor</label><input type="range" min="0" max="100" value={monoBass} onChange={(e)=>setMonoBass(e.target.value)} disabled={!isPro} /><span>{monoBass}%</span></div>
+                  <div className="sld-row" style={{marginTop: '25px', paddingTop: '15px', borderTop: '1px dashed var(--brd)'}}><label style={{color:'var(--acc)'}}>Vari-Mu Glue</label><input type="range" min="0" max="100" value={glueComp} onChange={(e)=>setGlueComp(e.target.value)} disabled={!isPro} /><span>{glueComp}%</span></div>
                 </div>
 
               </div>
@@ -407,10 +411,8 @@ export default function Home() {
       <style dangerouslySetInnerHTML={{ __html: `
         :root { --bg: #0d0d0d; --p: #161616; --brd: #262626; --txt: #e5e5e5; --acc: #4ade80; --sec: #888; }
         .light-mode { --bg: #f5f5f7; --p: #ffffff; --brd: #e5e5e7; --txt: #1d1d1f; --acc: #10b981; --sec: #86868b; }
-        
         body { margin: 0; background: var(--bg); color: var(--txt); font-family: -apple-system, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
         .workspace { max-width: 1200px; margin: 0 auto; padding: 20px; }
-        
         .main-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
         .brand { font-size: 1.4rem; font-weight: 900; letter-spacing: -1px; }
         .accent { color: var(--acc); }
@@ -418,25 +420,20 @@ export default function Home() {
         .tier-label { font-size: 0.7rem; font-weight: 800; background: var(--brd); padding: 5px 12px; border-radius: 50px; color: var(--sec); }
         .btn-icon, .btn-text { background: none; border: 1px solid var(--brd); color: var(--txt); padding: 7px 14px; border-radius: 8px; cursor: pointer; font-size: 0.75rem; font-weight: 700; transition: 0.2s; }
         .btn-icon:hover, .btn-text:hover { background: var(--brd); }
-        
         .vertical-layout { display: flex; flex-direction: column; gap: 30px; width: 100%; }
-        
         .panel { background: var(--p); border: 1px solid var(--brd); border-radius: 12px; padding: 25px; box-shadow: 0 4px 30px rgba(0,0,0,0.1); }
         .panel-top { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--brd); padding-bottom: 15px; margin-bottom: 20px; }
         .panel-top h3 { font-size: 1rem; margin: 0; font-weight: 800; letter-spacing: -0.5px; }
         .panel-top span { font-size: 0.8rem; color: var(--sec); }
-        
         .upload-container { background: rgba(0,0,0,0.05); border: 1px solid var(--brd); border-radius: 8px; padding: 20px; margin-bottom: 15px; }
         .drop-area { display: flex; height: 80px; border: 1px dashed var(--sec); border-radius: 6px; align-items: center; justify-content: center; font-size: 0.85rem; color: var(--sec); margin-bottom: 15px; cursor: pointer; transition: 0.2s; }
         .drop-area:hover { border-color: var(--acc); color: var(--txt); }
         .action-row { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; }
         .btn-prime { background: var(--acc); color: #000; border: none; padding: 12px; border-radius: 6px; font-weight: 800; cursor: pointer; font-size: 0.9rem; transition: 0.2s; }
         .btn-sub { background: var(--txt); color: var(--bg); border: none; padding: 12px; border-radius: 6px; font-weight: 800; cursor: pointer; text-align: center; font-size: 0.9rem; display: block; }
-        
         .track-list { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
         .track-list li { padding: 12px 15px; border-radius: 6px; display: flex; align-items: center; gap: 12px; cursor: pointer; font-size: 0.85rem; border: 1px solid var(--brd); background: rgba(0,0,0,0.02); }
         .track-list li.active { background: rgba(74,222,128,0.1); border-color: var(--acc); }
-        
         .monitor-row { display: flex; gap: 20px; align-items: center; }
         .m-controls { width: 120px; flex-shrink: 0; }
         .m-label { font-size: 0.85rem; font-weight: 800; margin: 0 0 8px 0; }
@@ -445,27 +442,22 @@ export default function Home() {
         .btn-p { width: 100%; padding: 8px; border: none; background: var(--txt); color: var(--bg); border-radius: 6px; font-size: 0.75rem; font-weight: 800; cursor: pointer; transition: 0.2s; }
         .btn-p.download { background: #3b82f6; color: #fff; text-decoration: none; }
         .btn-p:disabled { opacity: 0.3; cursor: not-allowed; }
-        
         .time-display { text-align: right; font-size: 0.7rem; font-family: "SF Mono", monospace; color: var(--sec); margin-bottom: 6px; font-weight: bold; }
         .wave-box { width: 100%; height: 160px; background: rgba(0,0,0,0.05); border: 1px solid var(--brd); border-radius: 8px; position: relative; overflow: hidden; cursor: pointer; }
         canvas { width: 100%; height: 100%; display: block; }
         .seeker { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 10px rgba(255,255,255,0.8); pointer-events: none; }
         .no-file-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.05); display: flex; align-items: center; justify-content: center; font-size: 0.85rem; color: var(--sec); font-weight: 600; }
-        
         .control-groups-wrapper { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 30px; }
         .control-group { background: rgba(0,0,0,0.02); padding: 20px; border-radius: 8px; border: 1px solid var(--brd); }
         .g-title { font-size: 0.85rem; font-weight: 800; margin-bottom: 20px; color: var(--txt); border-bottom: 1px solid var(--brd); padding-bottom: 10px; }
-        
         .sel-box { margin-bottom: 15px; }
         .sel-box label { font-size: 0.75rem; font-weight: 600; color: var(--sec); display: block; margin-bottom: 5px; }
         .styled-select { background: var(--bg); color: var(--txt); border: 1px solid var(--brd); padding: 8px 12px; border-radius: 6px; font-size: 0.8rem; width: 100%; cursor: pointer; appearance: none; -webkit-appearance: none; }
         .styled-select:disabled { opacity: 0.4; cursor: not-allowed; }
-        
         .sld-row { display: flex; align-items: center; gap: 15px; margin-bottom: 15px; }
         .sld-row label { font-size: 0.8rem; width: 120px; font-weight: 600; color: var(--sec); }
         .sld-row input { flex: 1; accent-color: var(--acc); cursor: pointer; }
         .sld-row span { width: 65px; font-size: 0.75rem; text-align: right; color: var(--acc); font-family: monospace; font-weight: bold; }
-        
         .mt-20 { margin-top: 20px; }
         .auth-hero { text-align: center; padding: 150px 0; }
         .auth-hero h1 { font-size: 4rem; letter-spacing: -3px; line-height: 0.9; margin-bottom: 40px; font-weight: 900; }
