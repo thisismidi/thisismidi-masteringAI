@@ -39,11 +39,9 @@ export default function Home() {
   const [targetLufs, setTargetLufs] = useState("-14.0")
   const [truePeak, setTruePeak] = useState("-1.0")
   const [outputTrim, setOutputTrim] = useState("0.0")
-  const [presence, setPresence] = useState("0") // 🚨 Inflator 효과 추가
-  
+  const [presence, setPresence] = useState("0")
   const [warmth, setWarmth] = useState("0")
   const [treble, setTreble] = useState("0") 
-
   const [stereoWidth, setStereoWidth] = useState("100")
   const [spaceDepth, setSpaceDepth] = useState("0") 
   const [monoBass, setMonoBass] = useState("0")
@@ -69,6 +67,13 @@ export default function Home() {
     const m = Math.floor(time / 60).toString().padStart(2, '0')
     const s = Math.floor(time % 60).toString().padStart(2, '0')
     return `${m}:${s}`
+  }
+
+  // 🚨 [누락 복구] 다운로드 파일명 생성 함수
+  const getDownloadName = () => {
+    if (!files[activeIndex]) return 'Mastered.mp3'
+    const nameWithoutExt = files[activeIndex].name.split('.').slice(0, -1).join('.')
+    return `${nameWithoutExt}_Mastered.${outFormat.toLowerCase()}`
   }
 
   useEffect(() => {
@@ -223,7 +228,7 @@ export default function Home() {
       formData.append("file", files[i])
       formData.append("out_format", outFormat); formData.append("out_sample_rate", outSampleRate); formData.append("out_bit_depth", outBitDepth)
       formData.append("target_lufs", targetLufs); formData.append("true_peak", truePeak); formData.append("output_trim", outputTrim)
-      formData.append("presence", presence) // 🚨 백엔드 전송
+      formData.append("presence", presence) 
       formData.append("warmth", warmth); formData.append("treble", treble)
       formData.append("stereo_width", stereoWidth); formData.append("space_depth", spaceDepth); formData.append("mono_bass", monoBass); formData.append("glue_comp", glueComp)
       try {
