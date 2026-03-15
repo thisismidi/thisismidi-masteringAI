@@ -166,17 +166,17 @@ export default function Home() {
           <div className="brand">THISISMIDI <span className="accent">.</span></div>
           <div className="user-area">
             {user && <span className="tier-label">{tier}</span>}
-            <button onClick={() => setIsLightMode(!isLightMode)} className="btn-icon">{isLightMode ? '🌙' : '☀️'}</button>
+            <button onClick={() => setIsLightMode(!isLightMode)} className="btn-icon">{isLightMode ? 'DARK' : 'LIGHT'}</button>
             {user ? <button onClick={() => supabase.auth.signOut()} className="btn-text">LOGOUT</button> : <button onClick={() => supabase.auth.signInWithOAuth({provider:'google'})} className="btn-text">LOGIN</button>}
           </div>
         </header>
 
         {!user ? (
-          <div className="auth-hero"><h1>Mastering, <br/>Simplified.</h1><button onClick={()=>supabase.auth.signInWithOAuth({provider:'google'})} className="btn-prime">Get Started</button></div>
+          <div className="auth-hero"><h1>Mastering, <br/>Simplified.</h1><button onClick={()=>supabase.auth.signInWithOAuth({provider:'google'})} className="btn-prime">Start with Google</button></div>
         ) : (
-          <div className="grid-layout">
+          <div className="vertical-layout">
             
-            {/* [REF 1] Track Queue */}
+            {/* 1. Track Queue (상단) */}
             <section className="panel queue-panel">
               <div className="panel-top"><h3>Track Queue</h3><span>{files.length} tracks</span></div>
               <div className="upload-container">
@@ -191,7 +191,7 @@ export default function Home() {
                     const r = await fetch(ENGINE_URL, { method: "POST", body: fd })
                     const b = await r.blob(); setMasteredUrls(p => ({ ...p, [activeIndex]: URL.createObjectURL(b) }))
                     setIsProcessing(false)
-                  }} className="btn-prime" disabled={isProcessing || !files[activeIndex]}>{isProcessing ? '...' : 'START'}</button>
+                  }} className="btn-prime" disabled={isProcessing || !files[activeIndex]}>{isProcessing ? 'PROCESSING...' : 'START MASTERING'}</button>
                 </div>
               </div>
               <ul className="track-list">
@@ -204,69 +204,73 @@ export default function Home() {
               </ul>
             </section>
 
-            <div className="center-content">
-              {/* [REF 2] A/B Monitor */}
-              <section className="panel monitor-panel">
-                <div className="panel-top"><h3>A/B Monitor</h3><span className="selected-info">Selected: {files[activeIndex]?.name}</span></div>
-                
-                <div className="monitor-row">
-                  <div className="m-controls">
-                    <p className="m-label">Original</p>
-                    <div className="stats">LUFS: {origLufs} / TP: {origTp}</div>
-                    <button onClick={()=>togglePlay('orig')} className="btn-p">{origIsPlaying ? 'STOP' : 'PLAY'}</button>
-                  </div>
-                  <div className="wave-box" onClick={(e) => {
-                    if(!origAudioRef.current) return
-                    const rect = e.currentTarget.getBoundingClientRect()
-                    origAudioRef.current.currentTime = ((e.clientX - rect.left) / rect.width) * origDuration
-                  }}>
-                    <canvas ref={origCanvas} width={800} height={140} />
-                    <div className="seeker" style={{left: `${(origTime/origDuration)*100}%`}} />
-                  </div>
-                  <audio ref={origAudioRef} crossOrigin="anonymous" src={files[activeIndex] ? URL.createObjectURL(files[activeIndex]) : ''} onTimeUpdate={(e)=>setOrigTime(e.currentTarget.currentTime)} onLoadedMetadata={(e)=>setOrigDuration(e.currentTarget.duration)} />
+            {/* 2. A/B Monitor (중단) */}
+            <section className="panel monitor-panel">
+              <div className="panel-top"><h3>A/B Monitor</h3><span className="selected-info">Selected: {files[activeIndex]?.name || 'None'}</span></div>
+              
+              <div className="monitor-row">
+                <div className="m-controls">
+                  <p className="m-label">Original</p>
+                  <div className="stats">LUFS: {origLufs}<br/>TP: {origTp}</div>
+                  <button onClick={()=>togglePlay('orig')} className="btn-p">{origIsPlaying ? 'STOP' : 'PLAY'}</button>
                 </div>
+                <div className="wave-box" onClick={(e) => {
+                  if(!origAudioRef.current) return
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  origAudioRef.current.currentTime = ((e.clientX - rect.left) / rect.width) * origDuration
+                }}>
+                  <canvas ref={origCanvas} width={1000} height={140} />
+                  <div className="seeker" style={{left: `${(origTime/origDuration)*100}%`}} />
+                </div>
+                <audio ref={origAudioRef} crossOrigin="anonymous" src={files[activeIndex] ? URL.createObjectURL(files[activeIndex]) : ''} onTimeUpdate={(e)=>setOrigTime(e.currentTarget.currentTime)} onLoadedMetadata={(e)=>setOrigDuration(e.currentTarget.duration)} />
+              </div>
 
-                <div className="monitor-row mt-20">
-                  <div className="m-controls">
-                    <p className="m-label color-m">Mastered</p>
-                    <div className="stats">LUFS: {mastLufs} / TP: {mastTp}</div>
+              <div className="monitor-row mt-20">
+                <div className="m-controls">
+                  <p className="m-label color-m">Mastered</p>
+                  <div className="stats">LUFS: {mastLufs}<br/>TP: {mastTp}</div>
+                  <div style={{display:'flex', flexDirection:'column', gap:'5px'}}>
                     <button onClick={()=>togglePlay('mast')} className="btn-p" disabled={!masteredUrls[activeIndex]}>{mastIsPlaying ? 'STOP' : 'PLAY'}</button>
+                    {masteredUrls[activeIndex] && <a href={masteredUrls[activeIndex]} download={`Mastered_${files[activeIndex].name}`} className="btn-p download" style={{textAlign:'center'}}>SAVE</a>}
                   </div>
-                  <div className="wave-box" onClick={(e) => {
-                    if(!mastAudioRef.current) return
-                    const rect = e.currentTarget.getBoundingClientRect()
-                    mastAudioRef.current.currentTime = ((e.clientX - rect.left) / rect.width) * mastDuration
-                  }}>
-                    <canvas ref={mastCanvas} width={800} height={140} />
-                    <div className="seeker" style={{left: `${(mastTime/mastDuration)*100}%` || '0'}} />
-                    {!masteredUrls[activeIndex] && <div className="no-file-overlay">No mastered file yet</div>}
-                  </div>
-                  <audio ref={mastAudioRef} crossOrigin="anonymous" src={masteredUrls[activeIndex] || ''} onTimeUpdate={(e)=>setMastTime(e.currentTarget.currentTime)} onLoadedMetadata={(e)=>setMastDuration(e.currentTarget.duration)} />
                 </div>
-              </section>
+                <div className="wave-box" onClick={(e) => {
+                  if(!mastAudioRef.current) return
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  mastAudioRef.current.currentTime = ((e.clientX - rect.left) / rect.width) * mastDuration
+                }}>
+                  <canvas ref={mastCanvas} width={1000} height={140} />
+                  <div className="seeker" style={{left: `${(mastTime/mastDuration)*100}%` || '0'}} />
+                  {!masteredUrls[activeIndex] && <div className="no-file-overlay">No mastered file yet</div>}
+                </div>
+                <audio ref={mastAudioRef} crossOrigin="anonymous" src={masteredUrls[activeIndex] || ''} onTimeUpdate={(e)=>setMastTime(e.currentTarget.currentTime)} onLoadedMetadata={(e)=>setMastDuration(e.currentTarget.duration)} />
+              </div>
+            </section>
 
-              {/* [REF 3] Mastering Controls */}
-              <section className="panel controls-panel">
-                <div className="panel-top"><h3>Mastering Controls</h3></div>
-                
+            {/* 3. Mastering Controls (하단) */}
+            <section className="panel controls-panel">
+              <div className="panel-top"><h3>Mastering Controls {!isPro && '(Pro Features Locked 🔒)'}</h3></div>
+              
+              <div className="control-groups-wrapper">
                 <div className="control-group">
                   <p className="g-title">Loudness and Safety</p>
                   <div className="sld-row"><label>Target LUFS</label><input type="range" min="-24" max="-6" step="0.5" value={targetLufs} onChange={(e)=>setTargetLufs(e.target.value)} /><span>{targetLufs}</span></div>
                   <div className="sld-row"><label>True Peak Ceiling</label><input type="range" min="-3" max="0" step="0.1" value={truePeak} onChange={(e)=>setTruePeak(e.target.value)} /><span>{truePeak} dBTP</span></div>
                 </div>
 
-                <div className="control-group mt-15">
+                <div className="control-group">
                   <p className="g-title">Tone Character</p>
-                  <div className="sld-row"><label>Warmth</label><input type="range" min="0" max="100" value={warmth} onChange={(e)=>setWarmth(e.target.value)} /><span>{warmth}%</span></div>
+                  <div className="sld-row"><label>Warmth</label><input type="range" min="0" max="100" value={warmth} onChange={(e)=>setWarmth(e.target.value)} disabled={!isPro} /><span>{warmth}%</span></div>
                 </div>
 
-                <div className="control-group mt-15">
+                <div className="control-group">
                   <p className="g-title">Stereo and Space</p>
-                  <div className="sld-row"><label>Stereo Width</label><input type="range" min="0" max="200" value={stereoWidth} onChange={(e)=>setStereoWidth(e.target.value)} /><span>{stereoWidth}%</span></div>
-                  <div className="sld-row"><label>Mono Bass Anchor</label><input type="range" min="0" max="100" value={monoBass} onChange={(e)=>setMonoBass(e.target.value)} /><span>{monoBass}%</span></div>
+                  <div className="sld-row"><label>Stereo Width</label><input type="range" min="0" max="200" value={stereoWidth} onChange={(e)=>setStereoWidth(e.target.value)} disabled={!isPro} /><span>{stereoWidth}%</span></div>
+                  <div className="sld-row"><label>Mono Bass Anchor</label><input type="range" min="0" max="100" value={monoBass} onChange={(e)=>setMonoBass(e.target.value)} disabled={!isPro} /><span>{monoBass}%</span></div>
                 </div>
-              </section>
-            </div>
+              </div>
+            </section>
+
           </div>
         )}
       </div>
@@ -276,45 +280,64 @@ export default function Home() {
         .light-mode { --bg: #f5f5f7; --p: #ffffff; --brd: #e5e5e7; --txt: #1d1d1f; --acc: #0071e3; --sec: #86868b; }
         
         body { margin: 0; background: var(--bg); color: var(--txt); font-family: -apple-system, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
-        .workspace { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .workspace { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        
+        /* Header */
         .main-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
-        .brand { font-size: 1.2rem; font-weight: 800; letter-spacing: -1px; }
+        .brand { font-size: 1.4rem; font-weight: 900; letter-spacing: -1px; }
         .accent { color: var(--acc); }
-        .panel { background: var(--p); border: 1px solid var(--brd); border-radius: 8px; padding: 16px; margin-bottom: 20px; box-shadow: 0 4px 30px rgba(0,0,0,0.2); }
-        .panel-top { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--brd); padding-bottom: 12px; margin-bottom: 15px; }
-        .panel-top h3 { font-size: 0.8rem; margin: 0; text-transform: uppercase; letter-spacing: 0.5px; color: var(--sec); }
+        .user-area { display: flex; align-items: center; gap: 15px; }
+        .tier-label { font-size: 0.7rem; font-weight: 800; background: var(--brd); padding: 5px 12px; border-radius: 50px; color: var(--sec); }
+        .btn-icon, .btn-text { background: none; border: 1px solid var(--brd); color: var(--txt); padding: 7px 14px; border-radius: 8px; cursor: pointer; font-size: 0.75rem; font-weight: 700; transition: 0.2s; }
+        .btn-icon:hover, .btn-text:hover { background: var(--brd); }
         
-        .grid-layout { display: grid; grid-template-columns: 320px 1fr; gap: 20px; }
-        .upload-container { background: #000; border: 1px solid var(--brd); border-radius: 6px; padding: 15px; margin-bottom: 15px; }
-        .drop-area { display: block; height: 60px; border: 1px dashed #333; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; color: var(--sec); margin-bottom: 12px; }
-        .action-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-        .btn-prime { background: var(--acc); color: #000; border: none; padding: 10px; border-radius: 4px; font-weight: 700; cursor: pointer; font-size: 0.8rem; }
-        .btn-sub { background: #333; color: #fff; border: none; padding: 10px; border-radius: 4px; font-weight: 700; cursor: pointer; text-align: center; font-size: 0.8rem; }
+        /* 🚨 레이아웃을 세로형(위에서 아래로)으로 완전히 변경 */
+        .vertical-layout { display: flex; flex-direction: column; gap: 30px; width: 100%; }
         
-        .track-list { list-style: none; padding: 0; margin: 0; }
-        .track-list li { padding: 10px; border-radius: 4px; display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 0.8rem; }
-        .track-list li.active { background: #222; border-left: 3px solid var(--acc); }
+        .panel { background: var(--p); border: 1px solid var(--brd); border-radius: 12px; padding: 25px; box-shadow: 0 4px 30px rgba(0,0,0,0.1); }
+        .panel-top { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--brd); padding-bottom: 15px; margin-bottom: 20px; }
+        .panel-top h3 { font-size: 1rem; margin: 0; font-weight: 800; letter-spacing: -0.5px; }
+        .panel-top span { font-size: 0.8rem; color: var(--sec); }
         
+        /* 1. Queue Panel */
+        .upload-container { background: rgba(0,0,0,0.05); border: 1px solid var(--brd); border-radius: 8px; padding: 20px; margin-bottom: 15px; }
+        .drop-area { display: flex; height: 80px; border: 1px dashed var(--sec); border-radius: 6px; align-items: center; justify-content: center; font-size: 0.85rem; color: var(--sec); margin-bottom: 15px; cursor: pointer; transition: 0.2s; }
+        .drop-area:hover { border-color: var(--acc); color: var(--txt); }
+        .action-row { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; }
+        .btn-prime { background: var(--acc); color: #000; border: none; padding: 12px; border-radius: 6px; font-weight: 800; cursor: pointer; font-size: 0.9rem; transition: 0.2s; }
+        .btn-sub { background: var(--txt); color: var(--bg); border: none; padding: 12px; border-radius: 6px; font-weight: 800; cursor: pointer; text-align: center; font-size: 0.9rem; display: block; }
+        
+        .track-list { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
+        .track-list li { padding: 12px 15px; border-radius: 6px; display: flex; align-items: center; gap: 12px; cursor: pointer; font-size: 0.85rem; border: 1px solid var(--brd); background: rgba(0,0,0,0.02); }
+        .track-list li.active { background: rgba(74,222,128,0.1); border-color: var(--acc); }
+        
+        /* 2. Monitor Panel */
         .monitor-row { display: flex; gap: 20px; align-items: center; }
-        .m-controls { width: 100px; }
-        .m-label { font-size: 0.75rem; font-weight: 700; margin: 0 0 5px 0; }
+        .m-controls { width: 120px; flex-shrink: 0; }
+        .m-label { font-size: 0.85rem; font-weight: 800; margin: 0 0 8px 0; }
         .color-m { color: #3b82f6; }
-        .stats { font-size: 0.65rem; color: var(--sec); font-family: monospace; margin-bottom: 10px; }
-        .btn-p { width: 100%; padding: 6px; border: 1px solid #444; background: #000; color: #fff; border-radius: 4px; font-size: 0.65rem; cursor: pointer; }
-        .wave-box { flex: 1; height: 140px; background: rgba(0,0,0,0.3); border-radius: 6px; position: relative; overflow: hidden; cursor: pointer; }
-        .seeker { position: absolute; top: 0; bottom: 0; width: 1.5px; background: #fff; box-shadow: 0 0 10px #fff; pointer-events: none; }
-        .no-file-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; font-size: 0.8rem; color: #555; }
+        .stats { font-size: 0.7rem; color: var(--sec); font-family: monospace; margin-bottom: 12px; line-height: 1.4; }
+        .btn-p { width: 100%; padding: 8px; border: none; background: var(--txt); color: var(--bg); border-radius: 6px; font-size: 0.75rem; font-weight: 800; cursor: pointer; transition: 0.2s; }
+        .btn-p.download { background: #3b82f6; color: #fff; text-decoration: none; }
+        .btn-p:disabled { opacity: 0.3; cursor: not-allowed; }
         
-        .control-group { border-bottom: 1px solid var(--brd); padding-bottom: 15px; }
-        .g-title { font-size: 0.75rem; font-weight: 700; margin-bottom: 15px; color: var(--sec); }
-        .sld-row { display: flex; align-items: center; gap: 20px; margin-bottom: 10px; }
-        .sld-row label { font-size: 0.75rem; width: 150px; }
+        .wave-box { flex: 1; height: 160px; background: rgba(0,0,0,0.05); border: 1px solid var(--brd); border-radius: 8px; position: relative; overflow: hidden; cursor: pointer; }
+        canvas { width: 100%; height: 100%; display: block; }
+        .seeker { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 10px rgba(255,255,255,0.8); pointer-events: none; }
+        .no-file-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.05); display: flex; align-items: center; justify-content: center; font-size: 0.85rem; color: var(--sec); font-weight: 600; }
+        
+        /* 3. Controls Panel */
+        .control-groups-wrapper { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 30px; }
+        .control-group { background: rgba(0,0,0,0.02); padding: 20px; border-radius: 8px; border: 1px solid var(--brd); }
+        .g-title { font-size: 0.85rem; font-weight: 800; margin-bottom: 20px; color: var(--txt); border-bottom: 1px solid var(--brd); padding-bottom: 10px; }
+        .sld-row { display: flex; align-items: center; gap: 15px; margin-bottom: 15px; }
+        .sld-row label { font-size: 0.8rem; width: 120px; font-weight: 600; color: var(--sec); }
         .sld-row input { flex: 1; accent-color: var(--acc); cursor: pointer; }
-        .sld-row span { width: 60px; font-size: 0.75rem; text-align: right; color: var(--acc); font-family: monospace; }
+        .sld-row span { width: 65px; font-size: 0.75rem; text-align: right; color: var(--acc); font-family: monospace; font-weight: bold; }
         
-        .mt-20 { margin-top: 20px; } .mt-15 { margin-top: 15px; }
+        .mt-20 { margin-top: 20px; }
         .auth-hero { text-align: center; padding: 150px 0; }
-        .auth-hero h1 { font-size: 4rem; letter-spacing: -3px; line-height: 0.9; margin-bottom: 40px; }
+        .auth-hero h1 { font-size: 4rem; letter-spacing: -3px; line-height: 0.9; margin-bottom: 40px; font-weight: 900; }
       `}} />
     </main>
   )
