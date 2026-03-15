@@ -45,7 +45,7 @@ export default function Home() {
   const [stereoWidth, setStereoWidth] = useState("100")
   const [monoBass, setMonoBass] = useState("0")
 
-  // 🚨 [추가] 아웃풋 포맷 파라미터
+  // 아웃풋 포맷 파라미터
   const [outFormat, setOutFormat] = useState("MP3")
   const [outSampleRate, setOutSampleRate] = useState("44100")
   const [outBitDepth, setOutBitDepth] = useState("16")
@@ -92,7 +92,6 @@ export default function Home() {
     }
   }
 
-  // 🚨 [추가] 무료 유저는 항상 MP3 / 44.1 / 16bit로 고정
   useEffect(() => {
     if (!isPro) {
       setOutFormat("MP3")
@@ -164,8 +163,9 @@ export default function Home() {
     update()
   }
 
-  const handleSeek = (e: React.MouseEvent<HTMLDivElement>, audioRef: React.RefObject<HTMLAudioElement>, duration: number, type: 'orig' | 'mast') => {
-    if (!audioRef.current || !duration || duration === 0) return
+  // 🚨 [Vercel 에러 해결] audioRef 매개변수에 '| null' 타입을 명시적으로 추가했습니다!
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>, audioRef: React.RefObject<HTMLAudioElement | null>, duration: number, type: 'orig' | 'mast') => {
+    if (!audioRef || !audioRef.current || !duration || duration === 0) return
     const rect = e.currentTarget.getBoundingClientRect()
     const clickX = e.nativeEvent.offsetX
     const targetTime = (clickX / rect.width) * duration
@@ -241,7 +241,6 @@ export default function Home() {
     const formData = new FormData()
     formData.append("file", files[activeIndex]); formData.append("target_lufs", targetLufs); formData.append("true_peak", truePeak)
     formData.append("warmth", warmth); formData.append("stereo_width", stereoWidth); formData.append("mono_bass", monoBass)
-    // 🚨 [추가] 백엔드로 포맷 데이터 전송
     formData.append("out_format", outFormat); 
     formData.append("out_sample_rate", outSampleRate); 
     formData.append("out_bit_depth", outBitDepth);
@@ -254,7 +253,6 @@ export default function Home() {
     } catch (e) { alert("엔진 응답 없음") } finally { setIsProcessing(false) }
   }
 
-  // 파일 다운로드 시 원본 이름 유지 및 확장자 변경
   const getDownloadName = () => {
     if (!files[activeIndex]) return 'Mastered.mp3'
     const nameWithoutExt = files[activeIndex].name.split('.').slice(0, -1).join('.')
@@ -329,7 +327,6 @@ export default function Home() {
                   <div className="stats">LUFS: {mastLufs}<br/>TP: {mastTp}</div>
                   <div style={{display:'flex', flexDirection:'column', gap:'5px'}}>
                     <button onClick={()=>togglePlay('mast')} className="btn-p" disabled={!masteredUrls[activeIndex]}>{mastIsPlaying ? 'STOP' : 'PLAY'}</button>
-                    {/* 🚨 [변경] SAVE 버튼을 DOWNLOAD로 변경하고 동적 이름 적용 */}
                     {masteredUrls[activeIndex] && <a href={masteredUrls[activeIndex]} download={getDownloadName()} className="btn-p download" style={{textAlign:'center'}}>DOWNLOAD</a>}
                   </div>
                 </div>
@@ -355,7 +352,6 @@ export default function Home() {
               <div className="panel-top"><h3>Mastering Controls {!isPro && '(Pro Features Locked 🔒)'}</h3></div>
               <div className="control-groups-wrapper">
                 
-                {/* 🚨 [추가] 레퍼런스와 동일한 Output Format 섹션 */}
                 <div className="control-group">
                   <p className="g-title">Output Format {!isPro && <span style={{color:'var(--acc)', fontSize:'0.7rem', fontWeight:'normal'}}>(Free Tier Locked)</span>}</p>
                   <div className="sel-box">
@@ -460,7 +456,6 @@ export default function Home() {
         .control-group { background: rgba(0,0,0,0.02); padding: 20px; border-radius: 8px; border: 1px solid var(--brd); }
         .g-title { font-size: 0.85rem; font-weight: 800; margin-bottom: 20px; color: var(--txt); border-bottom: 1px solid var(--brd); padding-bottom: 10px; }
         
-        /* 🚨 추가된 Select 박스 스타일 */
         .sel-box { margin-bottom: 15px; }
         .sel-box label { font-size: 0.75rem; font-weight: 600; color: var(--sec); display: block; margin-bottom: 5px; }
         .styled-select { background: var(--bg); color: var(--txt); border: 1px solid var(--brd); padding: 8px 12px; border-radius: 6px; font-size: 0.8rem; width: 100%; cursor: pointer; appearance: none; -webkit-appearance: none; }
