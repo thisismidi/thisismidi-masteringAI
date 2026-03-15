@@ -20,6 +20,7 @@ export default function Home() {
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [masterAudioUrl, setMasterAudioUrl] = useState<string | null>(null)
   const [mastered, setMastered] = useState(false)
+  const [isProcessing, setIsProcessing] = useState(false) // 🚨 로딩 상태 추가!
   
   // 플레이어 상태
   const origAudioRef = useRef<HTMLAudioElement>(null)
@@ -35,14 +36,14 @@ export default function Home() {
   const origCanvas = useRef<HTMLCanvasElement>(null)
   const mastCanvas = useRef<HTMLCanvasElement>(null)
 
-  // 엔진 파라미터 상태 (Loudness)
+  // 엔진 파라미터 상태
   const [targetLufs, setTargetLufs] = useState("-14.0")
   const [truePeak, setTruePeak] = useState("-1.0")
   
-  // PRO 파라미터 상태 (Tone & Stereo)
-  const [warmth, setWarmth] = useState("0") // 0 ~ 100%
-  const [stereoWidth, setStereoWidth] = useState("100") // 0 ~ 200%
-  const [monoBass, setMonoBass] = useState("0") // 0 ~ 100%
+  // PRO 파라미터 상태
+  const [warmth, setWarmth] = useState("0") 
+  const [stereoWidth, setStereoWidth] = useState("100") 
+  const [monoBass, setMonoBass] = useState("0") 
   
   // 아웃풋 포맷 상태
   const [format, setFormat] = useState('mp3') 
@@ -90,7 +91,8 @@ export default function Home() {
     }
   }, [activeIndex, files])
 
-  const draw = async (f: File, canvas: HTMLCanvasElement, color: string, isMaster: boolean = false) => {
+  // 🚨 파형 그리는 함수 (이제 시뮬레이션을 쓰지 않고 진짜 데이터를 그립니다)
+  const draw = async (f: File, canvas: HTMLCanvasElement, color: string) => {
     if (typeof window === 'undefined' || !canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
@@ -99,10 +101,6 @@ export default function Home() {
       const buffer = await audioCtx.decodeAudioData(await f.arrayBuffer())
       const data = buffer.getChannelData(0)
       const step = Math.ceil(data.length / canvas.width)
-      
-      const visualGain = isMaster ? Math.max(0.5, 1 + (parseFloat(targetLufs) + 14) * 0.15) : 1;
-      const tpLimit = isMaster ? Math.pow(10, parseFloat(truePeak) / 20) : 1;
-      const warmthFactor = isMaster && isPro ? 1 + (parseFloat(warmth) * 0.002) : 1;
       
       ctx.clearRect(0, 0, canvas.width, canvas.height)
       ctx.beginPath()
@@ -113,13 +111,6 @@ export default function Home() {
         let min = 1, max = -1
         for (let j = 0; j < step; j++) {
           let d = data[i * step + j]
-          
-          if (isMaster) {
-            d = d * visualGain * warmthFactor
-            if (d > tpLimit) d = tpLimit 
-            if (d < -tpLimit) d = -tpLimit 
-          }
-          
           if (d < min) min = d; if (d > max) max = d
         }
         ctx.moveTo(i, (1 + min) * canvas.height / 2)
@@ -164,13 +155,15 @@ export default function Home() {
 
   useEffect(() => {
     if (files[activeIndex] && origCanvas.current) {
-      draw(files[activeIndex], origCanvas.current, '#4ade80', false)
+      draw(files[activeIndex], origCanvas.current, '#4ade80')
     }
   }, [files, activeIndex, isLightMode])
 
-  const runMastering = () => {
+  // 🚨 핵심: 백엔드 서버로 데이터를 전송하는 진짜 마스터링 로직 🚨
+  const runMastering = async () => {
     if (files.length === 0) return
     
+    setIsProcessing(true) // 버튼 로딩 중...
     setMastered(false)
     setMastTime(0)
     if (mastAudioRef.current) {
@@ -179,11 +172,42 @@ export default function Home() {
       setMastIsPlaying(false)
     }
 
-    setTimeout(() => {
+    const currentFile = files[activeIndex]
+    const formData = new FormData()
+    formData.append("file", currentFile)
+    formData.append("target_lufs", targetLufs)
+    formData.append("true_peak", truePeak)
+    
+    try {
+      // 🚀 대표님 컴퓨터(로컬)의 8000번 포트로 데이터 쏘기!
+      const response = await fetch("http://127.0.0.1:8000/master", {
+        method: "POST",
+        body: formData,
+      })
+
+      if (!response.ok) {
+        throw new Error("서버 에러가 발생했습니다.")
+      }
+
+      // 📥 완성된 오디오 데이터 받기
+      const blob = await response.blob()
+      const newAudioUrl = URL.createObjectURL(blob)
+      
+      setMasterAudioUrl(newAudioUrl)
       setMastered(true)
-      if (mastCanvas.current) draw(files[activeIndex], mastCanvas.current, '#3b82f6', true)
-      setMasterAudioUrl(audioUrl)
-    }, 1500)
+      setIsProcessing(false)
+
+      // 🎨 시뮬레이션이 아닌, 백엔드가 보내준 진짜 마스터링 파일로 파란색 파형을 그림!
+      if (mastCanvas.current) {
+        const masteredFile = new File([blob], `mastered_${currentFile.name}`, { type: "audio/wav" })
+        draw(masteredFile, mastCanvas.current, '#3b82f6')
+      }
+
+    } catch (error) {
+      console.error(error)
+      alert("마스터링 서버에 연결할 수 없습니다. 터미널에서 백엔드 서버가 켜져 있는지 확인해주세요!")
+      setIsProcessing(false)
+    }
   }
 
   const togglePlayOrig = () => {
@@ -246,7 +270,7 @@ export default function Home() {
           </div>
         ) : (
           <div className="dash">
-            {/* 1. Track Queue 영역 (+ START 버튼 이동) */}
+            {/* 1. Track Queue 영역 (+ START 버튼) */}
             <section className="panel" style={{marginBottom:'20px', padding:'0'}}>
               <div style={{padding:'15px 20px', borderBottom:'1px solid var(--brd)', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
                 <h2 style={{fontSize:'0.9rem', margin:0, fontWeight:'bold'}}>Track Queue</h2>
@@ -273,8 +297,13 @@ export default function Home() {
                   </ul>
                 )}
                 
-                {/* 🚨 START MASTERING 버튼을 이쪽으로 끌어올렸습니다 🚨 */}
-                <button onClick={runMastering} className="render-btn" disabled={files.length === 0} style={{width:'100%', background:'var(--acc)', color:'#000', border:'none', padding:'18px', borderRadius:'12px', fontWeight:900, cursor:'pointer', transition:'0.2s', marginTop:'20px'}}>START MASTERING</button>
+                <button 
+                  onClick={runMastering} 
+                  className="render-btn" 
+                  disabled={files.length === 0 || isProcessing} 
+                  style={{width:'100%', background: isProcessing ? '#444' : 'var(--acc)', color: isProcessing ? '#fff' : '#000', border:'none', padding:'18px', borderRadius:'12px', fontWeight:900, cursor:'pointer', transition:'0.2s', marginTop:'20px'}}>
+                  {isProcessing ? 'PROCESSING AUDIO...' : 'START MASTERING'}
+                </button>
               </div>
             </section>
 
@@ -304,7 +333,7 @@ export default function Home() {
                       <div style={{display:'flex', gap:'10px', alignItems:'center'}}>
                         <span style={{fontFamily:'monospace', fontSize:'0.75rem', color:'#888', letterSpacing:'1px', marginRight:'5px'}}>{formatTime(mastTime)} / {formatTime(mastDuration)}</span>
                         <button onClick={togglePlayMast} className="play-btn">{mastIsPlaying ? '⏹ STOP' : '▶ PLAY'}</button>
-                        <a href={masterAudioUrl || '#'} download={`mastered_${files[activeIndex]?.name || 'audio'}`} style={{textDecoration:'none'}}>
+                        <a href={masterAudioUrl || '#'} download={`MASTERED_${files[activeIndex]?.name || 'audio.wav'}`} style={{textDecoration:'none'}}>
                           <button className="play-btn" style={{background:'#3b82f6'}}>⬇ DOWNLOAD</button>
                         </a>
                       </div>
@@ -312,7 +341,7 @@ export default function Home() {
                   </div>
                   <div style={{position:'relative', cursor: mastered ? 'pointer' : 'default'}} onClick={(e) => mastered && handleSeek(e, mastAudioRef, mastDuration, true)}>
                     <canvas ref={mastCanvas} width={700} height={180} style={{width:'100%', background:'rgba(0,0,0,0.2)', borderRadius:'8px', display:'block'}} />
-                    {!mastered && <div style={{position:'absolute', top:0, left:0, right:0, bottom:0, display:'flex', alignItems:'center', justifyContent:'center', color:'#666', fontSize:'0.8rem', background:'rgba(0,0,0,0.8)', borderRadius:'8px'}}>No mastered file yet</div>}
+                    {!mastered && <div style={{position:'absolute', top:0, left:0, right:0, bottom:0, display:'flex', alignItems:'center', justifyContent:'center', color:'#666', fontSize:'0.8rem', background:'rgba(0,0,0,0.8)', borderRadius:'8px'}}>{isProcessing ? 'Mastering in progress...' : 'No mastered file yet'}</div>}
                     {mastered && <div style={{position:'absolute', top:0, bottom:0, left:`${mastDuration > 0 ? (mastTime/mastDuration)*100 : 0}%`, width:'2px', background:'#fff', pointerEvents:'none'}} />}
                   </div>
                 </div>
