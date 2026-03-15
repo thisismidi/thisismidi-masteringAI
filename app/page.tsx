@@ -2,7 +2,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { useState, useEffect, useRef } from 'react'
-import JSZip from 'jszip' // 🚨 [추가] ZIP 압축 라이브러리
+import JSZip from 'jszip'
 
 const supabaseUrl = 'https://vjjowuamlwnuagaacind.supabase.co'
 const supabaseKey = 'sb_publishable_6dZKot10ye-Ii1OEw1d_Mg_ZFodzHjE'
@@ -39,8 +39,11 @@ export default function Home() {
   const [targetLufs, setTargetLufs] = useState("-14.0")
   const [truePeak, setTruePeak] = useState("-1.0")
   const [outputTrim, setOutputTrim] = useState("0.0")
+  const [presence, setPresence] = useState("0") // 🚨 Inflator 효과 추가
+  
   const [warmth, setWarmth] = useState("0")
   const [treble, setTreble] = useState("0") 
+
   const [stereoWidth, setStereoWidth] = useState("100")
   const [spaceDepth, setSpaceDepth] = useState("0") 
   const [monoBass, setMonoBass] = useState("0")
@@ -112,20 +115,11 @@ export default function Home() {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(e.target.files || [])
     const limit = isPro ? 15 : 1
-    
     if (selected.length > limit) {
-      alert(isPro 
-        ? `PRO 요금제는 한 번에 최대 15곡까지만 처리할 수 있습니다.` 
-        : `무료 버전은 한 번에 1곡만 마스터링할 수 있습니다. 🔒\nPRO로 업그레이드하고 최대 15곡 일괄(Batch) 마스터링을 이용해 보세요!`)
+      alert(isPro ? `최대 15곡까지만 처리 가능합니다.` : `무료 버전은 1곡만 가능합니다. 🔒`)
       setFiles(selected.slice(0, limit))
-    } else {
-      setFiles(selected)
-    }
-    
-    setActiveIndex(0)
-    setMasteredUrls({})
-    setOrigIsPlaying(false)
-    setMastIsPlaying(false)
+    } else { setFiles(selected) }
+    setActiveIndex(0); setMasteredUrls({}); setOrigIsPlaying(false); setMastIsPlaying(false);
   }
 
   const ensureAudioRouting = (audio: HTMLAudioElement) => {
@@ -138,8 +132,7 @@ export default function Home() {
         const source = ctx.createMediaElementSource(audio)
         const analyzer = ctx.createAnalyser()
         analyzer.fftSize = 2048
-        source.connect(analyzer)
-        analyzer.connect(ctx.destination) 
+        source.connect(analyzer); analyzer.connect(ctx.destination) 
         sourceNodes.current.set(audio, { source, analyzer })
       } catch (e) { console.error(e) }
     }
@@ -158,17 +151,13 @@ export default function Home() {
         sum += data[i] * data[i]
       }
       const meter = type === 'orig' ? origMeterData.current : mastMeterData.current
-      meter.sum += sum
-      meter.samples += data.length
+      meter.sum += sum; meter.samples += data.length
       if (peak > meter.maxPeak) meter.maxPeak = peak
-
       const tp = meter.maxPeak > 0 ? 20 * Math.log10(meter.maxPeak) : -70
       const avgRms = Math.sqrt(meter.sum / meter.samples)
       const lufs = avgRms > 0 ? 20 * Math.log10(avgRms) - 0.691 : -70
-      
       if (type === 'orig') { setOrigLufs(Math.round(lufs * 10) / 10); setOrigTp(Math.round(tp * 10) / 10); }
       else { setMastLufs(Math.round(lufs * 10) / 10); setMastTp(Math.round(tp * 10) / 10); }
-      
       rafIdRef.current = requestAnimationFrame(update)
     }
     update()
@@ -180,7 +169,6 @@ export default function Home() {
     const clickX = e.nativeEvent.offsetX
     const targetTime = (clickX / rect.width) * duration
     audioRef.current.currentTime = targetTime
-
     if (type === 'orig') origMeterData.current = { sum: 0, samples: 0, maxPeak: 0 }
     if (type === 'mast') mastMeterData.current = { sum: 0, samples: 0, maxPeak: 0 }
   }
@@ -189,20 +177,13 @@ export default function Home() {
     const audio = type === 'orig' ? origAudioRef.current : mastAudioRef.current
     if (!audio) return
     if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') await audioCtxRef.current.resume()
-
     if (type === 'orig') {
       if (origIsPlaying) { audio.pause(); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); } 
-      else { 
-        mastAudioRef.current?.pause(); setMastIsPlaying(false);
-        try { await audio.play(); startAnalyzing(audio, 'orig') } catch (e) { console.error(e) }
-      }
+      else { mastAudioRef.current?.pause(); setMastIsPlaying(false); try { await audio.play(); startAnalyzing(audio, 'orig') } catch (e) { console.error(e) } }
       setOrigIsPlaying(!origIsPlaying)
     } else {
       if (mastIsPlaying) { audio.pause(); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); } 
-      else { 
-        origAudioRef.current?.pause(); setOrigIsPlaying(false);
-        try { await audio.play(); startAnalyzing(audio, 'mast') } catch (e) { console.error(e) }
-      }
+      else { origAudioRef.current?.pause(); setOrigIsPlaying(false); try { await audio.play(); startAnalyzing(audio, 'mast') } catch (e) { console.error(e) } }
       setMastIsPlaying(!mastIsPlaying)
     }
   }
@@ -216,8 +197,7 @@ export default function Home() {
       const tCtx = new AudioContext()
       const audioBuf = await tCtx.decodeAudioData(buf)
       const data = audioBuf.getChannelData(0)
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-      ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = 1.2
+      ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = 1.2
       const step = Math.floor(data.length / canvas.width)
       for (let i = 0; i < canvas.width; i++) {
         let min = 1, max = -1
@@ -236,76 +216,39 @@ export default function Home() {
   }, [files, activeIndex, isLightMode, masteredUrls])
 
   const runBatchMastering = async () => {
-    if (files.length === 0) return; 
-    setIsProcessing(true);
-
+    if (files.length === 0) return; setIsProcessing(true)
     for (let i = 0; i < files.length; i++) {
-      setActiveIndex(i); 
-      
+      setActiveIndex(i)
       const formData = new FormData()
       formData.append("file", files[i])
-      formData.append("out_format", outFormat) 
-      formData.append("out_sample_rate", outSampleRate) 
-      formData.append("out_bit_depth", outBitDepth)
-
-      formData.append("target_lufs", targetLufs)
-      formData.append("true_peak", truePeak)
-      formData.append("output_trim", outputTrim)
-      formData.append("warmth", warmth)
-      formData.append("treble", treble)
-      formData.append("stereo_width", stereoWidth)
-      formData.append("space_depth", spaceDepth)
-      formData.append("mono_bass", monoBass)
-      formData.append("glue_comp", glueComp)
-
+      formData.append("out_format", outFormat); formData.append("out_sample_rate", outSampleRate); formData.append("out_bit_depth", outBitDepth)
+      formData.append("target_lufs", targetLufs); formData.append("true_peak", truePeak); formData.append("output_trim", outputTrim)
+      formData.append("presence", presence) // 🚨 백엔드 전송
+      formData.append("warmth", warmth); formData.append("treble", treble)
+      formData.append("stereo_width", stereoWidth); formData.append("space_depth", spaceDepth); formData.append("mono_bass", monoBass); formData.append("glue_comp", glueComp)
       try {
         const resp = await fetch(ENGINE_URL, { method: "POST", body: formData })
-        if (!resp.ok) throw new Error("엔진 오류");
-        const blob = await resp.blob(); 
-        
+        if (!resp.ok) throw new Error("엔진 오류")
+        const blob = await resp.blob()
         setMasteredUrls(p => ({ ...p, [i]: URL.createObjectURL(blob) }))
         mastMeterData.current = { sum: 0, samples: 0, maxPeak: 0 } 
-      } catch (e) { 
-        alert(`[${files[i].name}] 마스터링 중 오류가 발생했습니다.`)
-      }
+      } catch (e) { alert(`[${files[i].name}] 오류`) }
     }
-    setIsProcessing(false);
+    setIsProcessing(false)
   }
 
-  const getDownloadName = () => {
-    if (!files[activeIndex]) return 'Mastered.mp3'
-    const nameWithoutExt = files[activeIndex].name.split('.').slice(0, -1).join('.')
-    return `${nameWithoutExt}_Mastered.${outFormat.toLowerCase()}`
-  }
-
-  // 🚨 [추가] 완료된 모든 곡을 ZIP 파일로 묶어서 다운로드하는 기능
   const downloadAllAsZip = async () => {
     const zip = new JSZip()
     const masteredKeys = Object.keys(masteredUrls)
-    
     if (masteredKeys.length === 0) return
-
     for (const key of masteredKeys) {
-      const index = Number(key)
-      const url = masteredUrls[index]
-      const file = files[index]
+      const index = Number(key); const url = masteredUrls[index]; const file = files[index]
       const nameWithoutExt = file.name.split('.').slice(0, -1).join('.')
       const fileName = `${nameWithoutExt}_Mastered.${outFormat.toLowerCase()}`
-      
-      try {
-        const response = await fetch(url)
-        const blob = await response.blob()
-        zip.file(fileName, blob)
-      } catch (e) {
-        console.error("ZIP 파일 생성 중 오류:", e)
-      }
+      try { const response = await fetch(url); const blob = await response.blob(); zip.file(fileName, blob) } catch (e) { console.error(e) }
     }
-    
     const content = await zip.generateAsync({ type: 'blob' })
-    const link = document.createElement('a')
-    link.href = URL.createObjectURL(content)
-    link.download = 'THISISMIDI_Mastered_Tracks.zip'
-    link.click()
+    const link = document.createElement('a'); link.href = URL.createObjectURL(content); link.download = 'Mastered_Tracks.zip'; link.click()
   }
 
   return (
@@ -329,19 +272,14 @@ export default function Home() {
               <div className="panel-top"><h3>Track Queue</h3><span>{files.length} tracks {isPro ? '(Max 15)' : '(Max 1)'}</span></div>
               <div className="upload-container">
                 <input type="file" id="u-file" hidden multiple onChange={handleFileUpload} accept="audio/*" />
-                <label htmlFor="u-file" className="drop-area">Drop audio files here (WAV, MP3, etc)</label>
+                <label htmlFor="u-file" className="drop-area">Drop audio files here</label>
                 <div className="action-row">
                   <label htmlFor="u-file" className="btn-sub">UPLOAD</label>
                   <button onClick={runBatchMastering} className="btn-prime" disabled={isProcessing || files.length === 0}>
                     {isProcessing ? 'PROCESSING...' : (files.length > 1 ? `MASTER ALL ${files.length} TRACKS` : 'START MASTERING')}
                   </button>
                 </div>
-                {/* 🚨 [추가] 마스터링이 2곡 이상 완료되었을 때 나타나는 ZIP 다운로드 버튼 */}
-                {Object.keys(masteredUrls).length > 1 && (
-                  <button onClick={downloadAllAsZip} className="btn-prime zip-btn">
-                    📥 DOWNLOAD ALL AS ZIP
-                  </button>
-                )}
+                {Object.keys(masteredUrls).length > 1 && <button onClick={downloadAllAsZip} className="btn-prime zip-btn">📥 DOWNLOAD ALL AS ZIP</button>}
               </div>
               <ul className="track-list">
                 {files.map((f, i) => (
@@ -356,11 +294,9 @@ export default function Home() {
 
             <section className="panel monitor-panel">
               <div className="panel-top"><h3>A/B Monitor</h3><span className="selected-info">Selected: {files[activeIndex]?.name || 'None'}</span></div>
-              
               <div className="monitor-row">
                 <div className="m-controls">
                   <p className="m-label" style={{color: 'var(--acc)'}}>Original</p>
-                  {/* 🚨 [변경] LUFS -> Integrated 로 용어 수정 */}
                   <div className="stats">Integrated: {origLufs}<br/>TP: {origTp}</div>
                   <button onClick={()=>togglePlay('orig')} className="btn-p">{origIsPlaying ? 'STOP' : 'PLAY'}</button>
                 </div>
@@ -371,19 +307,11 @@ export default function Home() {
                     <div className="seeker" style={{left: origDuration > 0 ? `${(origTime/origDuration)*100}%` : '0'}} />
                   </div>
                 </div>
-                <audio 
-                  ref={origAudioRef} 
-                  src={currentOrigUrl} 
-                  onTimeUpdate={(e)=>setOrigTime(e.currentTarget.currentTime)} 
-                  onLoadedMetadata={(e)=>setOrigDuration(e.currentTarget.duration)} 
-                  onEnded={() => setOrigIsPlaying(false)}
-                />
+                <audio ref={origAudioRef} src={currentOrigUrl} onTimeUpdate={(e)=>setOrigTime(e.currentTarget.currentTime)} onLoadedMetadata={(e)=>setOrigDuration(e.currentTarget.duration)} onEnded={() => setOrigIsPlaying(false)} />
               </div>
-
               <div className="monitor-row mt-20">
                 <div className="m-controls">
                   <p className="m-label color-m">Mastered</p>
-                  {/* 🚨 [변경] LUFS -> Integrated 로 용어 수정 */}
                   <div className="stats">Integrated: {mastLufs}<br/>TP: {mastTp}</div>
                   <div style={{display:'flex', flexDirection:'column', gap:'5px'}}>
                     <button onClick={()=>togglePlay('mast')} className="btn-p" disabled={!masteredUrls[activeIndex]}>{mastIsPlaying ? 'STOP' : 'PLAY'}</button>
@@ -398,46 +326,18 @@ export default function Home() {
                     {!masteredUrls[activeIndex] && <div className="no-file-overlay">No mastered file yet</div>}
                   </div>
                 </div>
-                <audio 
-                  ref={mastAudioRef} 
-                  src={masteredUrls[activeIndex] || ''} 
-                  onTimeUpdate={(e)=>setMastTime(e.currentTarget.currentTime)} 
-                  onLoadedMetadata={(e)=>setMastDuration(e.currentTarget.duration)}
-                  onEnded={() => setMastIsPlaying(false)} 
-                />
+                <audio ref={mastAudioRef} src={masteredUrls[activeIndex] || ''} onTimeUpdate={(e)=>setMastTime(e.currentTarget.currentTime)} onLoadedMetadata={(e)=>setMastDuration(e.currentTarget.duration)} onEnded={() => setMastIsPlaying(false)} />
               </div>
             </section>
 
             <section className="panel controls-panel">
               <div className="panel-top"><h3>Mastering Controls {!isPro && '(Pro Features Locked 🔒)'}</h3></div>
               <div className="control-groups-wrapper">
-                
                 <div className="control-group">
-                  <p className="g-title">Output Format {!isPro && <span style={{color:'var(--acc)', fontSize:'0.7rem', fontWeight:'normal'}}>(Free Tier Locked)</span>}</p>
-                  <div className="sel-box">
-                    <label>Format</label>
-                    <select className="styled-select" value={outFormat} onChange={(e) => setOutFormat(e.target.value)} disabled={!isPro}>
-                      <option value="MP3">MP3</option>
-                      {isPro && <option value="WAV">WAV</option>}
-                      {isPro && <option value="FLAC">FLAC</option>}
-                    </select>
-                  </div>
-                  <div className="sel-box">
-                    <label>Sample Rate</label>
-                    <select className="styled-select" value={outSampleRate} onChange={(e) => setOutSampleRate(e.target.value)} disabled={!isPro}>
-                      <option value="44100">44.1 kHz</option>
-                      {isPro && <option value="48000">48 kHz</option>}
-                      {isPro && <option value="96000">96 kHz</option>}
-                    </select>
-                  </div>
-                  <div className="sel-box">
-                    <label>Bit Depth</label>
-                    <select className="styled-select" value={outBitDepth} onChange={(e) => setOutBitDepth(e.target.value)} disabled={!isPro}>
-                      <option value="16">16-bit</option>
-                      {isPro && <option value="24">24-bit</option>}
-                      {isPro && <option value="32">32-bit float</option>}
-                    </select>
-                  </div>
+                  <p className="g-title">Output Format</p>
+                  <div className="sel-box"><label>Format</label><select className="styled-select" value={outFormat} onChange={(e) => setOutFormat(e.target.value)} disabled={!isPro}><option value="MP3">MP3</option>{isPro && <><option value="WAV">WAV</option><option value="FLAC">FLAC</option></>}</select></div>
+                  <div className="sel-box"><label>Sample Rate</label><select className="styled-select" value={outSampleRate} onChange={(e) => setOutSampleRate(e.target.value)} disabled={!isPro}><option value="44100">44.1 kHz</option>{isPro && <><option value="48000">48 kHz</option><option value="96000">96 kHz</option></>}</select></div>
+                  <div className="sel-box"><label>Bit Depth</label><select className="styled-select" value={outBitDepth} onChange={(e) => setOutBitDepth(e.target.value)} disabled={!isPro}><option value="16">16-bit</option>{isPro && <><option value="24">24-bit</option><option value="32">32-bit float</option></>}</select></div>
                 </div>
 
                 <div className="control-group">
@@ -445,6 +345,7 @@ export default function Home() {
                   <div className="sld-row"><label>Target LUFS</label><input type="range" min="-24" max="-6" step="0.5" value={targetLufs} onChange={(e)=>setTargetLufs(e.target.value)} /><span>{targetLufs}</span></div>
                   <div className="sld-row"><label>True Peak Ceiling</label><input type="range" min="-3" max="0" step="0.1" value={truePeak} onChange={(e)=>setTruePeak(e.target.value)} /><span>{truePeak} dBTP</span></div>
                   <div className="sld-row"><label>Output Trim</label><input type="range" min="-6" max="6" step="0.1" value={outputTrim} onChange={(e)=>setOutputTrim(e.target.value)} disabled={!isPro} /><span>{outputTrim} dB</span></div>
+                  <div className="sld-row" style={{marginTop: '15px', borderTop: '1px dashed var(--brd)', paddingTop: '10px'}}><label style={{color: 'var(--acc)'}}>Presence</label><input type="range" min="0" max="100" value={presence} onChange={(e)=>setPresence(e.target.value)} disabled={!isPro} /><span>{presence}%</span></div>
                 </div>
                 
                 <div className="control-group">
@@ -460,10 +361,8 @@ export default function Home() {
                   <div className="sld-row"><label>Mono Bass Anchor</label><input type="range" min="0" max="100" value={monoBass} onChange={(e)=>setMonoBass(e.target.value)} disabled={!isPro} /><span>{monoBass}%</span></div>
                   <div className="sld-row" style={{marginTop: '25px', paddingTop: '15px', borderTop: '1px dashed var(--brd)'}}><label style={{color:'var(--acc)'}}>Vari-Mu Glue</label><input type="range" min="0" max="100" value={glueComp} onChange={(e)=>setGlueComp(e.target.value)} disabled={!isPro} /><span>{glueComp}%</span></div>
                 </div>
-
               </div>
             </section>
-
           </div>
         )}
       </div>
@@ -478,50 +377,44 @@ export default function Home() {
         .accent { color: var(--acc); }
         .user-area { display: flex; align-items: center; gap: 15px; }
         .tier-label { font-size: 0.7rem; font-weight: 800; background: var(--brd); padding: 5px 12px; border-radius: 50px; color: var(--sec); }
-        .btn-icon, .btn-text { background: none; border: 1px solid var(--brd); color: var(--txt); padding: 7px 14px; border-radius: 8px; cursor: pointer; font-size: 0.75rem; font-weight: 700; transition: 0.2s; }
+        .btn-icon, .btn-text { background: none; border: 1px solid var(--brd); color: var(--txt); padding: 7px 14px; border-radius: 8px; cursor: pointer; font-size: 0.75rem; font-weight: 700; }
         .btn-icon:hover, .btn-text:hover { background: var(--brd); }
         .vertical-layout { display: flex; flex-direction: column; gap: 30px; width: 100%; }
         .panel { background: var(--p); border: 1px solid var(--brd); border-radius: 12px; padding: 25px; box-shadow: 0 4px 30px rgba(0,0,0,0.1); }
         .panel-top { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--brd); padding-bottom: 15px; margin-bottom: 20px; }
-        .panel-top h3 { font-size: 1rem; margin: 0; font-weight: 800; letter-spacing: -0.5px; }
-        .panel-top span { font-size: 0.8rem; color: var(--sec); }
+        .panel-top h3 { font-size: 1rem; margin: 0; font-weight: 800; }
         .upload-container { background: rgba(0,0,0,0.05); border: 1px solid var(--brd); border-radius: 8px; padding: 20px; margin-bottom: 15px; }
-        .drop-area { display: flex; height: 80px; border: 1px dashed var(--sec); border-radius: 6px; align-items: center; justify-content: center; font-size: 0.85rem; color: var(--sec); margin-bottom: 15px; cursor: pointer; transition: 0.2s; }
-        .drop-area:hover { border-color: var(--acc); color: var(--txt); }
-        .action-row { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; }
-        .btn-prime { background: var(--acc); color: #000; border: none; padding: 12px; border-radius: 6px; font-weight: 800; cursor: pointer; font-size: 0.9rem; transition: 0.2s; }
+        .drop-area { display: flex; height: 80px; border: 1px dashed var(--sec); border-radius: 6px; align-items: center; justify-content: center; font-size: 0.85rem; color: var(--sec); cursor: pointer; }
+        .action-row { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; margin-top: 15px; }
+        .btn-prime { background: var(--acc); color: #000; border: none; padding: 12px; border-radius: 6px; font-weight: 800; cursor: pointer; }
         .zip-btn { margin-top: 10px; width: 100%; background: #3b82f6; color: #fff; }
-        .btn-sub { background: var(--txt); color: var(--bg); border: none; padding: 12px; border-radius: 6px; font-weight: 800; cursor: pointer; text-align: center; font-size: 0.9rem; display: block; }
+        .btn-sub { background: var(--txt); color: var(--bg); border: none; padding: 12px; border-radius: 6px; font-weight: 800; cursor: pointer; text-align: center; }
         .track-list { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
         .track-list li { padding: 12px 15px; border-radius: 6px; display: flex; align-items: center; gap: 12px; cursor: pointer; font-size: 0.85rem; border: 1px solid var(--brd); background: rgba(0,0,0,0.02); }
         .track-list li.active { background: rgba(74,222,128,0.1); border-color: var(--acc); }
         .monitor-row { display: flex; gap: 20px; align-items: center; }
         .m-controls { width: 120px; flex-shrink: 0; }
-        .m-label { font-size: 0.85rem; font-weight: 800; margin: 0 0 8px 0; }
-        .color-m { color: #3b82f6; }
-        .stats { font-size: 0.7rem; color: var(--sec); font-family: monospace; margin-bottom: 12px; line-height: 1.4; }
-        .btn-p { width: 100%; padding: 8px; border: none; background: var(--txt); color: var(--bg); border-radius: 6px; font-size: 0.75rem; font-weight: 800; cursor: pointer; transition: 0.2s; }
+        .m-label { font-size: 0.85rem; font-weight: 800; margin-bottom: 8px; }
+        .stats { font-size: 0.7rem; color: var(--sec); font-family: monospace; margin-bottom: 12px; }
+        .btn-p { width: 100%; padding: 8px; border: none; background: var(--txt); color: var(--bg); border-radius: 6px; font-size: 0.75rem; font-weight: 800; cursor: pointer; }
         .btn-p.download { background: #3b82f6; color: #fff; text-decoration: none; }
-        .btn-p:disabled { opacity: 0.3; cursor: not-allowed; }
-        .time-display { text-align: right; font-size: 0.7rem; font-family: "SF Mono", monospace; color: var(--sec); margin-bottom: 6px; font-weight: bold; }
+        .time-display { text-align: right; font-size: 0.7rem; color: var(--sec); margin-bottom: 6px; font-weight: bold; }
         .wave-box { width: 100%; height: 160px; background: rgba(0,0,0,0.05); border: 1px solid var(--brd); border-radius: 8px; position: relative; overflow: hidden; cursor: pointer; }
-        canvas { width: 100%; height: 100%; display: block; }
-        .seeker { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 10px rgba(255,255,255,0.8); pointer-events: none; }
-        .no-file-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.05); display: flex; align-items: center; justify-content: center; font-size: 0.85rem; color: var(--sec); font-weight: 600; }
+        canvas { width: 100%; height: 100%; }
+        .seeker { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 10px rgba(255,255,255,0.8); }
+        .no-file-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.05); display: flex; align-items: center; justify-content: center; font-size: 0.85rem; color: var(--sec); }
         .control-groups-wrapper { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 30px; }
         .control-group { background: rgba(0,0,0,0.02); padding: 20px; border-radius: 8px; border: 1px solid var(--brd); }
-        .g-title { font-size: 0.85rem; font-weight: 800; margin-bottom: 20px; color: var(--txt); border-bottom: 1px solid var(--brd); padding-bottom: 10px; }
+        .g-title { font-size: 0.85rem; font-weight: 800; margin-bottom: 20px; border-bottom: 1px solid var(--brd); padding-bottom: 10px; }
         .sel-box { margin-bottom: 15px; }
-        .sel-box label { font-size: 0.75rem; font-weight: 600; color: var(--sec); display: block; margin-bottom: 5px; }
-        .styled-select { background: var(--bg); color: var(--txt); border: 1px solid var(--brd); padding: 8px 12px; border-radius: 6px; font-size: 0.8rem; width: 100%; cursor: pointer; appearance: none; -webkit-appearance: none; }
-        .styled-select:disabled { opacity: 0.4; cursor: not-allowed; }
+        .sel-box label { font-size: 0.75rem; color: var(--sec); display: block; margin-bottom: 5px; }
+        .styled-select { background: var(--bg); color: var(--txt); border: 1px solid var(--brd); padding: 8px 12px; border-radius: 6px; width: 100%; }
         .sld-row { display: flex; align-items: center; gap: 15px; margin-bottom: 15px; }
-        .sld-row label { font-size: 0.8rem; width: 120px; font-weight: 600; color: var(--sec); }
+        .sld-row label { font-size: 0.8rem; width: 120px; color: var(--sec); }
         .sld-row input { flex: 1; accent-color: var(--acc); cursor: pointer; }
-        .sld-row span { width: 65px; font-size: 0.75rem; text-align: right; color: var(--acc); font-family: monospace; font-weight: bold; }
-        .mt-20 { margin-top: 20px; }
+        .sld-row span { width: 65px; font-size: 0.75rem; text-align: right; color: var(--acc); font-family: monospace; }
         .auth-hero { text-align: center; padding: 150px 0; }
-        .auth-hero h1 { font-size: 4rem; letter-spacing: -3px; line-height: 0.9; margin-bottom: 40px; font-weight: 900; }
+        .auth-hero h1 { font-size: 4rem; letter-spacing: -3px; line-height: 0.9; margin-bottom: 40px; }
       `}} />
     </main>
   )
