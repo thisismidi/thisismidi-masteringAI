@@ -38,11 +38,8 @@ export default function Home() {
   const [targetLufs, setTargetLufs] = useState("-14.0")
   const [truePeak, setTruePeak] = useState("-1.0")
   const [outputTrim, setOutputTrim] = useState("0.0")
-  
-  // 🚨 [변경] Tone Character: Warmth와 Treble만 남김
   const [warmth, setWarmth] = useState("0")
   const [treble, setTreble] = useState("0") 
-
   const [stereoWidth, setStereoWidth] = useState("100")
   const [spaceDepth, setSpaceDepth] = useState("0") 
   const [monoBass, setMonoBass] = useState("0")
@@ -110,6 +107,26 @@ export default function Home() {
       setCurrentOrigUrl('')
     }
   }, [files, activeIndex])
+
+  // 🚨 [추가] 파일 업로드 시 티어에 따른 제한 로직 (1곡 vs 15곡)
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(e.target.files || [])
+    const limit = isPro ? 15 : 1
+    
+    if (selected.length > limit) {
+      alert(isPro 
+        ? `PRO 요금제는 한 번에 최대 15곡까지만 처리할 수 있습니다.` 
+        : `무료 버전은 한 번에 1곡만 마스터링할 수 있습니다. 🔒\nPRO로 업그레이드하고 최대 15곡 일괄(Batch) 마스터링을 이용해 보세요!`)
+      setFiles(selected.slice(0, limit))
+    } else {
+      setFiles(selected)
+    }
+    
+    setActiveIndex(0)
+    setMasteredUrls({})
+    setOrigIsPlaying(false)
+    setMastIsPlaying(false)
+  }
 
   const ensureAudioRouting = (audio: HTMLAudioElement) => {
     if (!audioCtxRef.current) {
@@ -218,33 +235,46 @@ export default function Home() {
     if (masteredUrls[activeIndex] && mastCanvas.current) drawWave(masteredUrls[activeIndex], mastCanvas.current, isLightMode ? '#2563eb' : '#3b82f6') 
   }, [files, activeIndex, isLightMode, masteredUrls])
 
-  const runMastering = async () => {
-    if (files.length === 0) return; setIsProcessing(true)
-    const formData = new FormData()
-    formData.append("file", files[activeIndex])
-    formData.append("out_format", outFormat) 
-    formData.append("out_sample_rate", outSampleRate) 
-    formData.append("out_bit_depth", outBitDepth)
+  // 🚨 [변경] 단일 마스터링에서 전체 큐(Queue) 일괄 마스터링(Batch)으로 업그레이드
+  const runBatchMastering = async () => {
+    if (files.length === 0) return; 
+    setIsProcessing(true);
 
-    formData.append("target_lufs", targetLufs)
-    formData.append("true_peak", truePeak)
-    formData.append("output_trim", outputTrim)
+    // 올라온 곡들을 하나씩 순서대로 백엔드에 요청합니다.
+    for (let i = 0; i < files.length; i++) {
+      setActiveIndex(i); // 유저가 작업 진행률을 볼 수 있게 선택 곡을 자동으로 변경
+      
+      const formData = new FormData()
+      formData.append("file", files[i])
+      formData.append("out_format", outFormat) 
+      formData.append("out_sample_rate", outSampleRate) 
+      formData.append("out_bit_depth", outBitDepth)
+
+      formData.append("target_lufs", targetLufs)
+      formData.append("true_peak", truePeak)
+      formData.append("output_trim", outputTrim)
+      
+      formData.append("warmth", warmth)
+      formData.append("treble", treble)
+
+      formData.append("stereo_width", stereoWidth)
+      formData.append("space_depth", spaceDepth)
+      formData.append("mono_bass", monoBass)
+      formData.append("glue_comp", glueComp)
+
+      try {
+        const resp = await fetch(ENGINE_URL, { method: "POST", body: formData })
+        if (!resp.ok) throw new Error("엔진 오류");
+        const blob = await resp.blob(); 
+        
+        setMasteredUrls(p => ({ ...p, [i]: URL.createObjectURL(blob) }))
+        mastMeterData.current = { sum: 0, samples: 0, maxPeak: 0 } 
+      } catch (e) { 
+        alert(`[${files[i].name}] 마스터링 중 오류가 발생했습니다.`)
+      }
+    }
     
-    // 🚨 백엔드로 전송하는 파라미터 업데이트
-    formData.append("warmth", warmth)
-    formData.append("treble", treble)
-
-    formData.append("stereo_width", stereoWidth)
-    formData.append("space_depth", spaceDepth)
-    formData.append("mono_bass", monoBass)
-    formData.append("glue_comp", glueComp)
-
-    try {
-      const resp = await fetch(ENGINE_URL, { method: "POST", body: formData })
-      const blob = await resp.blob(); 
-      setMasteredUrls(p => ({ ...p, [activeIndex]: URL.createObjectURL(blob) }))
-      mastMeterData.current = { sum: 0, samples: 0, maxPeak: 0 } 
-    } catch (e) { alert("엔진 응답 없음") } finally { setIsProcessing(false) }
+    setIsProcessing(false);
   }
 
   const getDownloadName = () => {
@@ -271,13 +301,17 @@ export default function Home() {
           <div className="vertical-layout">
             
             <section className="panel queue-panel">
-              <div className="panel-top"><h3>Track Queue</h3><span>{files.length} tracks</span></div>
+              <div className="panel-top"><h3>Track Queue</h3><span>{files.length} tracks {isPro ? '(Max 15)' : '(Max 1)'}</span></div>
               <div className="upload-container">
-                <input type="file" id="u-file" hidden multiple onChange={(e)=>setFiles(Array.from(e.target.files || []))} />
+                {/* 🚨 업로드 제한 핸들러 적용 */}
+                <input type="file" id="u-file" hidden multiple onChange={handleFileUpload} accept="audio/*" />
                 <label htmlFor="u-file" className="drop-area">Drop audio files here (WAV, MP3, etc)</label>
                 <div className="action-row">
                   <label htmlFor="u-file" className="btn-sub">UPLOAD</label>
-                  <button onClick={runMastering} className="btn-prime" disabled={isProcessing || !files[activeIndex]}>{isProcessing ? 'PROCESSING...' : 'START MASTERING'}</button>
+                  {/* 🚨 곡 갯수에 따라 버튼 텍스트 변경 */}
+                  <button onClick={runBatchMastering} className="btn-prime" disabled={isProcessing || files.length === 0}>
+                    {isProcessing ? 'PROCESSING...' : (files.length > 1 ? `MASTER ALL ${files.length} TRACKS` : 'START MASTERING')}
+                  </button>
                 </div>
               </div>
               <ul className="track-list">
@@ -285,6 +319,7 @@ export default function Home() {
                   <li key={i} className={activeIndex === i ? 'active' : ''} onClick={() => { setActiveIndex(i); setOrigIsPlaying(false); setMastIsPlaying(false); }}>
                     <input type="checkbox" checked={activeIndex === i} readOnly />
                     <span className="name">{i+1}. {f.name}</span>
+                    {masteredUrls[i] && <span style={{fontSize:'0.7rem', color:'var(--acc)', marginLeft:'auto', fontWeight:'bold'}}>✓ DONE</span>}
                   </li>
                 ))}
               </ul>
@@ -381,7 +416,6 @@ export default function Home() {
                   <div className="sld-row"><label>Output Trim</label><input type="range" min="-6" max="6" step="0.1" value={outputTrim} onChange={(e)=>setOutputTrim(e.target.value)} disabled={!isPro} /><span>{outputTrim} dB</span></div>
                 </div>
                 
-                {/* 🚨 [변경] Tone Character UI 심플하게 정리 */}
                 <div className="control-group">
                   <p className="g-title">Tone Character</p>
                   <div className="sld-row"><label>Warmth</label><input type="range" min="0" max="100" value={warmth} onChange={(e)=>setWarmth(e.target.value)} disabled={!isPro} /><span>{warmth}%</span></div>
