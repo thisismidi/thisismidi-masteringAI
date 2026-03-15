@@ -45,6 +45,11 @@ export default function Home() {
   const [stereoWidth, setStereoWidth] = useState("100")
   const [monoBass, setMonoBass] = useState("0")
 
+  // 🚨 [추가] 아웃풋 포맷 파라미터
+  const [outFormat, setOutFormat] = useState("MP3")
+  const [outSampleRate, setOutSampleRate] = useState("44100")
+  const [outBitDepth, setOutBitDepth] = useState("16")
+
   const origAudioRef = useRef<HTMLAudioElement>(null)
   const mastAudioRef = useRef<HTMLAudioElement>(null)
   const origCanvas = useRef<HTMLCanvasElement>(null)
@@ -78,10 +83,23 @@ export default function Home() {
 
   const handleUser = (u: any) => {
     setUser(u)
-    if (u?.email === 'itsfreiar@gmail.com') setTier('DEVELOPER')
-    else if (u?.app_metadata?.is_pro) setTier('PRO')
-    else setTier('FREE')
+    if (u?.email === 'itsfreiar@gmail.com') {
+      setTier('DEVELOPER')
+    } else if (u?.app_metadata?.is_pro) {
+      setTier('PRO')
+    } else {
+      setTier('FREE')
+    }
   }
+
+  // 🚨 [추가] 무료 유저는 항상 MP3 / 44.1 / 16bit로 고정
+  useEffect(() => {
+    if (!isPro) {
+      setOutFormat("MP3")
+      setOutSampleRate("44100")
+      setOutBitDepth("16")
+    }
+  }, [isPro])
 
   useEffect(() => {
     if (files[activeIndex]) {
@@ -223,12 +241,24 @@ export default function Home() {
     const formData = new FormData()
     formData.append("file", files[activeIndex]); formData.append("target_lufs", targetLufs); formData.append("true_peak", truePeak)
     formData.append("warmth", warmth); formData.append("stereo_width", stereoWidth); formData.append("mono_bass", monoBass)
+    // 🚨 [추가] 백엔드로 포맷 데이터 전송
+    formData.append("out_format", outFormat); 
+    formData.append("out_sample_rate", outSampleRate); 
+    formData.append("out_bit_depth", outBitDepth);
+
     try {
       const resp = await fetch(ENGINE_URL, { method: "POST", body: formData })
       const blob = await resp.blob(); 
       setMasteredUrls(p => ({ ...p, [activeIndex]: URL.createObjectURL(blob) }))
       mastMeterData.current = { sum: 0, samples: 0, maxPeak: 0 } 
     } catch (e) { alert("엔진 응답 없음") } finally { setIsProcessing(false) }
+  }
+
+  // 파일 다운로드 시 원본 이름 유지 및 확장자 변경
+  const getDownloadName = () => {
+    if (!files[activeIndex]) return 'Mastered.mp3'
+    const nameWithoutExt = files[activeIndex].name.split('.').slice(0, -1).join('.')
+    return `${nameWithoutExt}_Mastered.${outFormat.toLowerCase()}`
   }
 
   return (
@@ -299,7 +329,8 @@ export default function Home() {
                   <div className="stats">LUFS: {mastLufs}<br/>TP: {mastTp}</div>
                   <div style={{display:'flex', flexDirection:'column', gap:'5px'}}>
                     <button onClick={()=>togglePlay('mast')} className="btn-p" disabled={!masteredUrls[activeIndex]}>{mastIsPlaying ? 'STOP' : 'PLAY'}</button>
-                    {masteredUrls[activeIndex] && <a href={masteredUrls[activeIndex]} download={`Mastered_${files[activeIndex].name}`} className="btn-p download" style={{textAlign:'center'}}>SAVE</a>}
+                    {/* 🚨 [변경] SAVE 버튼을 DOWNLOAD로 변경하고 동적 이름 적용 */}
+                    {masteredUrls[activeIndex] && <a href={masteredUrls[activeIndex]} download={getDownloadName()} className="btn-p download" style={{textAlign:'center'}}>DOWNLOAD</a>}
                   </div>
                 </div>
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
@@ -323,20 +354,53 @@ export default function Home() {
             <section className="panel controls-panel">
               <div className="panel-top"><h3>Mastering Controls {!isPro && '(Pro Features Locked 🔒)'}</h3></div>
               <div className="control-groups-wrapper">
+                
+                {/* 🚨 [추가] 레퍼런스와 동일한 Output Format 섹션 */}
+                <div className="control-group">
+                  <p className="g-title">Output Format {!isPro && <span style={{color:'var(--acc)', fontSize:'0.7rem', fontWeight:'normal'}}>(Free Tier Locked)</span>}</p>
+                  <div className="sel-box">
+                    <label>Format</label>
+                    <select className="styled-select" value={outFormat} onChange={(e) => setOutFormat(e.target.value)} disabled={!isPro}>
+                      <option value="MP3">MP3</option>
+                      {isPro && <option value="WAV">WAV</option>}
+                      {isPro && <option value="FLAC">FLAC</option>}
+                    </select>
+                  </div>
+                  <div className="sel-box">
+                    <label>Sample Rate</label>
+                    <select className="styled-select" value={outSampleRate} onChange={(e) => setOutSampleRate(e.target.value)} disabled={!isPro}>
+                      <option value="44100">44.1 kHz</option>
+                      {isPro && <option value="48000">48 kHz</option>}
+                      {isPro && <option value="96000">96 kHz</option>}
+                    </select>
+                  </div>
+                  <div className="sel-box">
+                    <label>Bit Depth</label>
+                    <select className="styled-select" value={outBitDepth} onChange={(e) => setOutBitDepth(e.target.value)} disabled={!isPro}>
+                      <option value="16">16-bit</option>
+                      {isPro && <option value="24">24-bit</option>}
+                      {isPro && <option value="32">32-bit float</option>}
+                    </select>
+                  </div>
+                </div>
+
                 <div className="control-group">
                   <p className="g-title">Loudness and Safety</p>
                   <div className="sld-row"><label>Target LUFS</label><input type="range" min="-24" max="-6" step="0.5" value={targetLufs} onChange={(e)=>setTargetLufs(e.target.value)} /><span>{targetLufs}</span></div>
                   <div className="sld-row"><label>True Peak Ceiling</label><input type="range" min="-3" max="0" step="0.1" value={truePeak} onChange={(e)=>setTruePeak(e.target.value)} /><span>{truePeak} dBTP</span></div>
                 </div>
+                
                 <div className="control-group">
                   <p className="g-title">Tone Character</p>
                   <div className="sld-row"><label>Warmth</label><input type="range" min="0" max="100" value={warmth} onChange={(e)=>setWarmth(e.target.value)} disabled={!isPro} /><span>{warmth}%</span></div>
                 </div>
+                
                 <div className="control-group">
                   <p className="g-title">Stereo and Space</p>
                   <div className="sld-row"><label>Stereo Width</label><input type="range" min="0" max="200" value={stereoWidth} onChange={(e)=>setStereoWidth(e.target.value)} disabled={!isPro} /><span>{stereoWidth}%</span></div>
                   <div className="sld-row"><label>Mono Bass Anchor</label><input type="range" min="0" max="100" value={monoBass} onChange={(e)=>setMonoBass(e.target.value)} disabled={!isPro} /><span>{monoBass}%</span></div>
                 </div>
+
               </div>
             </section>
 
@@ -392,9 +456,16 @@ export default function Home() {
         .seeker { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 10px rgba(255,255,255,0.8); pointer-events: none; }
         .no-file-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.05); display: flex; align-items: center; justify-content: center; font-size: 0.85rem; color: var(--sec); font-weight: 600; }
         
-        .control-groups-wrapper { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 30px; }
+        .control-groups-wrapper { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 30px; }
         .control-group { background: rgba(0,0,0,0.02); padding: 20px; border-radius: 8px; border: 1px solid var(--brd); }
         .g-title { font-size: 0.85rem; font-weight: 800; margin-bottom: 20px; color: var(--txt); border-bottom: 1px solid var(--brd); padding-bottom: 10px; }
+        
+        /* 🚨 추가된 Select 박스 스타일 */
+        .sel-box { margin-bottom: 15px; }
+        .sel-box label { font-size: 0.75rem; font-weight: 600; color: var(--sec); display: block; margin-bottom: 5px; }
+        .styled-select { background: var(--bg); color: var(--txt); border: 1px solid var(--brd); padding: 8px 12px; border-radius: 6px; font-size: 0.8rem; width: 100%; cursor: pointer; appearance: none; -webkit-appearance: none; }
+        .styled-select:disabled { opacity: 0.4; cursor: not-allowed; }
+        
         .sld-row { display: flex; align-items: center; gap: 15px; margin-bottom: 15px; }
         .sld-row label { font-size: 0.8rem; width: 120px; font-weight: 600; color: var(--sec); }
         .sld-row input { flex: 1; accent-color: var(--acc); cursor: pointer; }
