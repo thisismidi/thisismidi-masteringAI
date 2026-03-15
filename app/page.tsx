@@ -180,7 +180,7 @@ export default function Home() {
     
     try {
       // 🚀 대표님 컴퓨터(로컬)의 8000번 포트로 데이터 쏘기!
-      const response = await fetch("https://thisismidi-mastering-ai.onrender.com/master", {
+      const response = await fetch("https://thisismidi-thisismidi-mastering-engine.hf.space/master", {
         method: "POST",
         body: formData,
       })
