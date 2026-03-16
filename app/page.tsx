@@ -20,22 +20,17 @@ export default function Home() {
   const [isProcessing, setIsProcessing] = useState(false)
   const [currentOrigUrl, setCurrentOrigUrl] = useState<string>('')
 
-  const [origLufs, setOrigLufs] = useState(-70)
-  const [origTp, setOrigTp] = useState(-70)
-  const [mastLufs, setMastLufs] = useState(-70)
-  const [mastTp, setMastTp] = useState(-70)
+  const [origLufs, setOrigLufs] = useState(-70); const [origTp, setOrigTp] = useState(-70)
+  const [mastLufs, setMastLufs] = useState(-70); const [mastTp, setMastTp] = useState(-70)
 
   const origMeterData = useRef({ sum: 0, samples: 0, maxPeak: 0 })
   const mastMeterData = useRef({ sum: 0, samples: 0, maxPeak: 0 })
 
-  const [origTime, setOrigTime] = useState(0)
-  const [mastTime, setMastTime] = useState(0)
-  const [origDuration, setOrigDuration] = useState(0)
-  const [mastDuration, setMastDuration] = useState(0)
-  const [origIsPlaying, setOrigIsPlaying] = useState(false)
-  const [mastIsPlaying, setMastIsPlaying] = useState(false)
+  const [origTime, setOrigTime] = useState(0); const [mastTime, setMastTime] = useState(0)
+  const [origDuration, setOrigDuration] = useState(0); const [mastDuration, setMastDuration] = useState(0)
+  const [origIsPlaying, setOrigIsPlaying] = useState(false); const [mastIsPlaying, setMastIsPlaying] = useState(false)
 
-  // 🎛️ 마스터링 파라미터
+  // 🎛️ 마스터링 파라미터 상태
   const [targetLufs, setTargetLufs] = useState("-14.0")
   const [truePeak, setTruePeak] = useState("-1.0")
   const [outputTrim, setOutputTrim] = useState("0.0")
@@ -62,6 +57,24 @@ export default function Home() {
 
   const isPro = tier === 'PRO' || tier === 'DEVELOPER'
 
+  // 🚨 [신규] 프리셋 적용 함수
+  const applyPreset = (genre: string) => {
+    if (!isPro) { alert("PRESET 기능은 PRO 전용입니다. 🔒"); return; }
+    
+    switch(genre) {
+      case 'Hiphop':
+        setTargetLufs("-9.0"); setGlueComp("40"); setPresence("60"); setWarmth("70"); setTreble("30"); setStereoWidth("110"); setSpaceDepth("10"); break;
+      case 'Electronic':
+        setTargetLufs("-8.0"); setGlueComp("50"); setPresence("70"); setWarmth("20"); setTreble("60"); setStereoWidth("130"); setSpaceDepth("20"); break;
+      case 'RnB':
+        setTargetLufs("-12.0"); setGlueComp("30"); setPresence("40"); setWarmth("50"); setTreble("40"); setStereoWidth("115"); setSpaceDepth("15"); break;
+      case 'Film':
+        setTargetLufs("-14.0"); setGlueComp("20"); setPresence("30"); setWarmth("40"); setTreble("20"); setStereoWidth("140"); setSpaceDepth("40"); break;
+      case 'Ambient':
+        setTargetLufs("-16.0"); setGlueComp("10"); setPresence("20"); setWarmth("30"); setTreble("10"); setStereoWidth("160"); setSpaceDepth("60"); break;
+    }
+  }
+
   const formatTime = (time: number) => {
     if (isNaN(time) || !isFinite(time)) return "00:00"
     const m = Math.floor(time / 60).toString().padStart(2, '0')
@@ -69,7 +82,6 @@ export default function Home() {
     return `${m}:${s}`
   }
 
-  // 🚨 [누락 복구] 다운로드 파일명 생성 함수
   const getDownloadName = () => {
     if (!files[activeIndex]) return 'Mastered.mp3'
     const nameWithoutExt = files[activeIndex].name.split('.').slice(0, -1).join('.')
@@ -89,37 +101,27 @@ export default function Home() {
 
   const handleUser = (u: any) => {
     setUser(u)
-    if (u?.email === 'itsfreiar@gmail.com') {
-      setTier('DEVELOPER')
-    } else if (u?.app_metadata?.is_pro) {
-      setTier('PRO')
-    } else {
-      setTier('FREE')
-    }
+    if (u?.email === 'itsfreiar@gmail.com') { setTier('DEVELOPER') } 
+    else if (u?.app_metadata?.is_pro) { setTier('PRO') } 
+    else { setTier('FREE') }
   }
 
   useEffect(() => {
-    if (!isPro) {
-      setOutFormat("MP3"); setOutSampleRate("44100"); setOutBitDepth("16")
-    }
+    if (!isPro) { setOutFormat("MP3"); setOutSampleRate("44100"); setOutBitDepth("16") }
   }, [isPro])
 
   useEffect(() => {
     if (files[activeIndex]) {
-      const url = URL.createObjectURL(files[activeIndex])
-      setCurrentOrigUrl(url)
+      const url = URL.createObjectURL(files[activeIndex]); setCurrentOrigUrl(url)
       origMeterData.current = { sum: 0, samples: 0, maxPeak: 0 }
       mastMeterData.current = { sum: 0, samples: 0, maxPeak: 0 }
-      setOrigLufs(-70); setOrigTp(-70); setMastLufs(-70); setMastTp(-70);
+      setOrigLufs(-70); setOrigTp(-70); setMastLufs(-70); setMastTp(-70)
       return () => URL.revokeObjectURL(url) 
-    } else {
-      setCurrentOrigUrl('')
-    }
+    } else { setCurrentOrigUrl('') }
   }, [files, activeIndex])
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = Array.from(e.target.files || [])
-    const limit = isPro ? 15 : 1
+    const selected = Array.from(e.target.files || []); const limit = isPro ? 15 : 1
     if (selected.length > limit) {
       alert(isPro ? `최대 15곡까지만 처리 가능합니다.` : `무료 버전은 1곡만 가능합니다. 🔒`)
       setFiles(selected.slice(0, limit))
@@ -128,16 +130,12 @@ export default function Home() {
   }
 
   const ensureAudioRouting = (audio: HTMLAudioElement) => {
-    if (!audioCtxRef.current) {
-      audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)()
-    }
+    if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)()
     const ctx = audioCtxRef.current
     if (!sourceNodes.current.has(audio)) {
       try {
-        const source = ctx.createMediaElementSource(audio)
-        const analyzer = ctx.createAnalyser()
-        analyzer.fftSize = 2048
-        source.connect(analyzer); analyzer.connect(ctx.destination) 
+        const source = ctx.createMediaElementSource(audio); const analyzer = ctx.createAnalyser()
+        analyzer.fftSize = 2048; source.connect(analyzer); analyzer.connect(ctx.destination) 
         sourceNodes.current.set(audio, { source, analyzer })
       } catch (e) { console.error(e) }
     }
@@ -145,15 +143,12 @@ export default function Home() {
   }
 
   const startAnalyzing = (audio: HTMLAudioElement, type: 'orig' | 'mast') => {
-    const analyzer = ensureAudioRouting(audio)
-    if (!analyzer) return
+    const analyzer = ensureAudioRouting(audio); if (!analyzer) return
     const update = () => {
-      const data = new Float32Array(analyzer.fftSize)
-      analyzer.getFloatTimeDomainData(data)
+      const data = new Float32Array(analyzer.fftSize); analyzer.getFloatTimeDomainData(data)
       let peak = 0, sum = 0
       for (let i = 0; i < data.length; i++) {
-        const v = Math.abs(data[i]); if (v > peak) peak = v
-        sum += data[i] * data[i]
+        const v = Math.abs(data[i]); if (v > peak) peak = v; sum += data[i] * data[i]
       }
       const meter = type === 'orig' ? origMeterData.current : mastMeterData.current
       meter.sum += sum; meter.samples += data.length
@@ -170,17 +165,14 @@ export default function Home() {
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>, audioRef: React.RefObject<HTMLAudioElement | null>, duration: number, type: 'orig' | 'mast') => {
     if (!audioRef || !audioRef.current || !duration || duration === 0) return
-    const rect = e.currentTarget.getBoundingClientRect()
-    const clickX = e.nativeEvent.offsetX
-    const targetTime = (clickX / rect.width) * duration
+    const rect = e.currentTarget.getBoundingClientRect(); const clickX = e.nativeEvent.offsetX; const targetTime = (clickX / rect.width) * duration
     audioRef.current.currentTime = targetTime
     if (type === 'orig') origMeterData.current = { sum: 0, samples: 0, maxPeak: 0 }
     if (type === 'mast') mastMeterData.current = { sum: 0, samples: 0, maxPeak: 0 }
   }
 
   const togglePlay = async (type: 'orig' | 'mast') => {
-    const audio = type === 'orig' ? origAudioRef.current : mastAudioRef.current
-    if (!audio) return
+    const audio = type === 'orig' ? origAudioRef.current : mastAudioRef.current; if (!audio) return
     if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') await audioCtxRef.current.resume()
     if (type === 'orig') {
       if (origIsPlaying) { audio.pause(); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); } 
@@ -195,20 +187,14 @@ export default function Home() {
 
   const drawWave = async (file: File | string, canvas: HTMLCanvasElement, color: string) => {
     if (!canvas || !file) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
+    const ctx = canvas.getContext('2d'); if (!ctx) return
     try {
       const buf = (typeof file === 'string') ? await (await fetch(file)).arrayBuffer() : await file.arrayBuffer()
-      const tCtx = new AudioContext()
-      const audioBuf = await tCtx.decodeAudioData(buf)
-      const data = audioBuf.getChannelData(0)
+      const tCtx = new AudioContext(); const audioBuf = await tCtx.decodeAudioData(buf); const data = audioBuf.getChannelData(0)
       ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = 1.2
       const step = Math.floor(data.length / canvas.width)
       for (let i = 0; i < canvas.width; i++) {
-        let min = 1, max = -1
-        for (let j = 0; j < step; j++) {
-          const v = data[i * step + j]; if (v < min) min = v; if (v > max) max = v
-        }
+        let min = 1, max = -1; for (let j = 0; j < step; j++) { const v = data[i * step + j]; if (v < min) min = v; if (v > max) max = v }
         ctx.moveTo(i, (1 + min) * canvas.height / 2); ctx.lineTo(i, (1 + max) * canvas.height / 2)
       }
       ctx.stroke(); await tCtx.close()
@@ -225,27 +211,21 @@ export default function Home() {
     for (let i = 0; i < files.length; i++) {
       setActiveIndex(i)
       const formData = new FormData()
-      formData.append("file", files[i])
-      formData.append("out_format", outFormat); formData.append("out_sample_rate", outSampleRate); formData.append("out_bit_depth", outBitDepth)
+      formData.append("file", files[i]); formData.append("out_format", outFormat); formData.append("out_sample_rate", outSampleRate); formData.append("out_bit_depth", outBitDepth)
       formData.append("target_lufs", targetLufs); formData.append("true_peak", truePeak); formData.append("output_trim", outputTrim)
-      formData.append("presence", presence) 
-      formData.append("warmth", warmth); formData.append("treble", treble)
+      formData.append("presence", presence); formData.append("warmth", warmth); formData.append("treble", treble)
       formData.append("stereo_width", stereoWidth); formData.append("space_depth", spaceDepth); formData.append("mono_bass", monoBass); formData.append("glue_comp", glueComp)
       try {
         const resp = await fetch(ENGINE_URL, { method: "POST", body: formData })
-        if (!resp.ok) throw new Error("엔진 오류")
-        const blob = await resp.blob()
-        setMasteredUrls(p => ({ ...p, [i]: URL.createObjectURL(blob) }))
-        mastMeterData.current = { sum: 0, samples: 0, maxPeak: 0 } 
+        if (!resp.ok) throw new Error("엔진 오류"); const blob = await resp.blob()
+        setMasteredUrls(p => ({ ...p, [i]: URL.createObjectURL(blob) })); mastMeterData.current = { sum: 0, samples: 0, maxPeak: 0 } 
       } catch (e) { alert(`[${files[i].name}] 오류`) }
     }
     setIsProcessing(false)
   }
 
   const downloadAllAsZip = async () => {
-    const zip = new JSZip()
-    const masteredKeys = Object.keys(masteredUrls)
-    if (masteredKeys.length === 0) return
+    const zip = new JSZip(); const masteredKeys = Object.keys(masteredUrls); if (masteredKeys.length === 0) return
     for (const key of masteredKeys) {
       const index = Number(key); const url = masteredUrls[index]; const file = files[index]
       const nameWithoutExt = file.name.split('.').slice(0, -1).join('.')
@@ -335,6 +315,18 @@ export default function Home() {
               </div>
             </section>
 
+            {/* 🚨 [프리셋 패널 추가] */}
+            <section className="panel preset-panel">
+               <div className="panel-top"><h3>Mastering Presets {!isPro && '(Pro Features Locked 🔒)'}</h3></div>
+               <div className="preset-grid">
+                  {['Hiphop', 'Electronic', 'RnB', 'Film', 'Ambient'].map(genre => (
+                    <button key={genre} onClick={() => applyPreset(genre)} className="btn-preset" disabled={!isPro}>
+                      {genre === 'RnB' ? 'R&B' : genre === 'Film' ? 'Film Music' : genre}
+                    </button>
+                  ))}
+               </div>
+            </section>
+
             <section className="panel controls-panel">
               <div className="panel-top"><h3>Mastering Controls {!isPro && '(Pro Features Locked 🔒)'}</h3></div>
               <div className="control-groups-wrapper">
@@ -420,6 +412,12 @@ export default function Home() {
         .sld-row span { width: 65px; font-size: 0.75rem; text-align: right; color: var(--acc); font-family: monospace; }
         .auth-hero { text-align: center; padding: 150px 0; }
         .auth-hero h1 { font-size: 4rem; letter-spacing: -3px; line-height: 0.9; margin-bottom: 40px; }
+
+        /* 🚨 [프리셋 스타일] 추가 */
+        .preset-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+        .btn-preset { background: var(--bg); color: var(--txt); border: 1px solid var(--brd); padding: 15px; border-radius: 8px; font-weight: 800; font-size: 0.8rem; cursor: pointer; transition: 0.2s; }
+        .btn-preset:hover:not(:disabled) { border-color: var(--acc); background: rgba(74,222,128,0.05); }
+        .btn-preset:disabled { opacity: 0.3; cursor: not-allowed; }
       `}} />
     </main>
   )
