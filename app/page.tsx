@@ -87,6 +87,13 @@ export default function Home() {
   const isPro = tier === 'PRO' || tier === 'DEVELOPER'
   const progressPct = progress.total > 0 ? (progress.cur / progress.total) * 100 : 0
 
+  // ── 캔버스 클리어 헬퍼
+  const clearCanvas = (canvas: HTMLCanvasElement | null) => {
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height)
+  }
+
   useEffect(() => {
     document.title = 'THISISMIDI Mastering AI'
     supabase.auth.getSession().then(({ data: { session } }) => handleUser(session?.user ?? null))
@@ -113,7 +120,14 @@ export default function Home() {
       mastMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
       setOrigLufs(-70); setOrigTp(-70); setMastLufs(-70); setMastTp(-70)
       return () => URL.revokeObjectURL(url)
-    } else { setCurrentOrigUrl('') }
+    } else {
+      setCurrentOrigUrl('')
+      // 파일 없으면 캔버스 둘 다 클리어
+      clearCanvas(origCanvas.current)
+      clearCanvas(mastCanvas.current)
+      setOrigLufs(-70); setOrigTp(-70); setMastLufs(-70); setMastTp(-70)
+      setOrigTime(0); setOrigDur(0); setMastTime(0); setMastDur(0)
+    }
   }, [files, activeIndex])
 
   const drawWave = async (src: File | string, canvas: HTMLCanvasElement, color: string) => {
@@ -141,8 +155,16 @@ export default function Home() {
   useEffect(() => {
     const origColor = isDark ? '#4ade80' : '#16a34a'
     const mastColor = isDark ? '#60a5fa' : '#2563eb'
-    if (files[activeIndex] && origCanvas.current) drawWave(files[activeIndex], origCanvas.current, origColor)
-    if (masteredUrls[activeIndex] && mastCanvas.current) drawWave(masteredUrls[activeIndex], mastCanvas.current, mastColor)
+    if (files[activeIndex] && origCanvas.current) {
+      drawWave(files[activeIndex], origCanvas.current, origColor)
+    } else {
+      clearCanvas(origCanvas.current)
+    }
+    if (masteredUrls[activeIndex] && mastCanvas.current) {
+      drawWave(masteredUrls[activeIndex], mastCanvas.current, mastColor)
+    } else {
+      clearCanvas(mastCanvas.current)
+    }
   }, [files, activeIndex, isDark, masteredUrls])
 
   const ensureRouting = (audio: HTMLAudioElement) => {
@@ -227,9 +249,12 @@ export default function Home() {
     processFiles(dropped)
   }
 
-  // ── 트랙 개별 삭제
   const removeTrack = (e: React.MouseEvent, index: number) => {
     e.stopPropagation()
+    // 재생 중이면 먼저 정지
+    if (origPlaying) { origAudioRef.current?.pause(); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); setOrigPlaying(false) }
+    if (mastPlaying) { mastAudioRef.current?.pause(); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); setMastPlaying(false) }
+
     const newFiles = files.filter((_, i) => i !== index)
     const newUrls: Record<number, string> = {}
     Object.entries(masteredUrls).forEach(([k, v]) => {
@@ -239,12 +264,18 @@ export default function Home() {
     })
     setFiles(newFiles)
     setMasteredUrls(newUrls)
+
     if (newFiles.length === 0) {
-      setActiveIndex(0); setOrigPlaying(false); setMastPlaying(false)
+      // 파일 전부 삭제 → 캔버스 즉시 클리어
+      clearCanvas(origCanvas.current)
+      clearCanvas(mastCanvas.current)
+      setActiveIndex(0)
+      setOrigLufs(-70); setOrigTp(-70); setMastLufs(-70); setMastTp(-70)
+      setOrigTime(0); setOrigDur(0); setMastTime(0); setMastDur(0)
     } else {
       setActiveIndex(Math.min(activeIndex, newFiles.length - 1))
     }
-    toast(`트랙 삭제됨`, 'info')
+    toast('트랙 삭제됨', 'info')
   }
 
   const applyPreset = (genre: string) => {
@@ -285,9 +316,7 @@ export default function Home() {
       const res = await fetch(ENGINE_URL.replace('/master', '/'), { signal: AbortSignal.timeout(4000) })
       if (!res.ok && res.status !== 405) throw new Error('cold')
       setEngineStatus('running')
-    } catch {
-      await wakeUpEngine()
-    }
+    } catch { await wakeUpEngine() }
     for (let i = 0; i < files.length; i++) {
       setActiveIndex(i)
       setProgress({ cur: i + 1, total: files.length })
@@ -305,13 +334,9 @@ export default function Home() {
         setMasteredUrls(p => ({ ...p, [i]: URL.createObjectURL(blob) }))
         mastMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
         toast(`✓ ${files[i].name}`, 'success')
-      } catch {
-        toast(`처리 실패: ${files[i].name}`, 'error')
-      }
+      } catch { toast(`처리 실패: ${files[i].name}`, 'error') }
     }
-    setIsProcessing(false)
-    setEngineStatus('idle')
-    setProgress({ cur: 0, total: 0 })
+    setIsProcessing(false); setEngineStatus('idle'); setProgress({ cur: 0, total: 0 })
     if (files.length > 1) toast(`전체 ${files.length}곡 마스터링 완료!`, 'success')
   }
 
@@ -398,14 +423,12 @@ export default function Home() {
                 <span className="drop-main">{isDragOver ? '여기에 놓으세요!' : 'Drop audio files here or click to browse'}</span>
                 <span className="drop-sub">MP3 · WAV · FLAC · AIFF &nbsp;|&nbsp; Max {MAX_MB}MB per file</span>
               </label>
-
               <div className="action-row">
                 <label htmlFor="u-file" className="btn-sec">UPLOAD</label>
                 <button className="btn-prime" onClick={runBatchMastering} disabled={isProcessing || files.length === 0}>
                   {btnLabel()}
                 </button>
               </div>
-
               {engineStatus === 'warming' && (
                 <div className="cold-notice">
                   <span className="spin" />
@@ -421,7 +444,6 @@ export default function Home() {
               {Object.keys(masteredUrls).length > 1 && (
                 <button className="btn-zip" onClick={downloadZip}>📥 DOWNLOAD ALL AS ZIP</button>
               )}
-
               <ul className="track-list">
                 {files.map((f, i) => (
                   <li key={i}
@@ -431,7 +453,6 @@ export default function Home() {
                     <span className="t-name">{f.name}</span>
                     {isProcessing && progress.cur === i + 1 && engineStatus === 'running' && <span className="t-badge proc">◎</span>}
                     {masteredUrls[i] && <span className="t-badge done">✓</span>}
-                    {/* X 삭제 버튼 */}
                     {!isProcessing && (
                       <button className="t-remove" onClick={e => removeTrack(e, i)} title="트랙 삭제">✕</button>
                     )}
