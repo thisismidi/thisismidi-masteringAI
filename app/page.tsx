@@ -199,7 +199,6 @@ export default function Home() {
     }
   }
 
-  // ── 파일 공통 처리 (클릭 + 드래그 공통 사용)
   const processFiles = (selected: File[]) => {
     const limit    = isPro ? 15 : 1
     const oversize = selected.filter(f => f.size > MAX_MB * 1024 * 1024)
@@ -215,7 +214,6 @@ export default function Home() {
     processFiles(Array.from(e.target.files || []))
   }
 
-  // ── 드래그 앤 드롭
   const handleDragOver = (e: React.DragEvent<HTMLLabelElement>) => {
     e.preventDefault(); e.stopPropagation(); setIsDragOver(true)
   }
@@ -227,6 +225,26 @@ export default function Home() {
     const dropped = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('audio/'))
     if (dropped.length === 0) { toast('오디오 파일만 업로드 가능합니다.', 'warn'); return }
     processFiles(dropped)
+  }
+
+  // ── 트랙 개별 삭제
+  const removeTrack = (e: React.MouseEvent, index: number) => {
+    e.stopPropagation()
+    const newFiles = files.filter((_, i) => i !== index)
+    const newUrls: Record<number, string> = {}
+    Object.entries(masteredUrls).forEach(([k, v]) => {
+      const ki = Number(k)
+      if (ki < index) newUrls[ki] = v
+      else if (ki > index) newUrls[ki - 1] = v
+    })
+    setFiles(newFiles)
+    setMasteredUrls(newUrls)
+    if (newFiles.length === 0) {
+      setActiveIndex(0); setOrigPlaying(false); setMastPlaying(false)
+    } else {
+      setActiveIndex(Math.min(activeIndex, newFiles.length - 1))
+    }
+    toast(`트랙 삭제됨`, 'info')
   }
 
   const applyPreset = (genre: string) => {
@@ -403,6 +421,7 @@ export default function Home() {
               {Object.keys(masteredUrls).length > 1 && (
                 <button className="btn-zip" onClick={downloadZip}>📥 DOWNLOAD ALL AS ZIP</button>
               )}
+
               <ul className="track-list">
                 {files.map((f, i) => (
                   <li key={i}
@@ -412,6 +431,10 @@ export default function Home() {
                     <span className="t-name">{f.name}</span>
                     {isProcessing && progress.cur === i + 1 && engineStatus === 'running' && <span className="t-badge proc">◎</span>}
                     {masteredUrls[i] && <span className="t-badge done">✓</span>}
+                    {/* X 삭제 버튼 */}
+                    {!isProcessing && (
+                      <button className="t-remove" onClick={e => removeTrack(e, i)} title="트랙 삭제">✕</button>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -618,6 +641,9 @@ export default function Home() {
         .t-badge      { font-size: .65rem; font-weight: 800; flex-shrink: 0; }
         .t-badge.done { color: var(--acc); }
         .t-badge.proc { color: #fbbf24; }
+        .t-remove { flex-shrink: 0; background: none; border: none; color: var(--txt2); font-size: .75rem; cursor: pointer; padding: 2px 4px; border-radius: 4px; line-height: 1; opacity: 0; transition: .15s; }
+        .track-item:hover .t-remove { opacity: 1; }
+        .t-remove:hover { background: rgba(248,113,113,.15); color: #f87171; }
         .mon-row   { display: flex; gap: 16px; align-items: flex-start; }
         .mon-ctrl  { width: 108px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; }
         .mon-label { font-size: .72rem; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
