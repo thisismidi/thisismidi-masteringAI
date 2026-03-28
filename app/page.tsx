@@ -160,6 +160,7 @@ export default function Home() {
   const ensureRouting = (audio: HTMLAudioElement) => {
     if (!audioCtxRef.current) audioCtxRef.current = new ((window as any).AudioContext || (window as any).webkitAudioContext)()
     const ctx = audioCtxRef.current
+    if (!ctx) return
     if (!sourceNodes.current.has(audio)) {
       try {
         const src = ctx.createMediaElementSource(audio)
