@@ -4,7 +4,6 @@ import { createClient } from '@supabase/supabase-js'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import JSZip from 'jszip'
 
-// ✅ [1순위] 하드코딩 제거 → 환경변수로 이동
 const supabaseUrl = 'https://vjjowuamlwnuagaacind.supabase.co'
 const supabaseKey = 'sb_publishable_6dZKot10ye-Ii1OEw1d_Mg_ZFodzHjE'
 const supabase     = createClient(supabaseUrl, supabaseKey)
@@ -12,12 +11,10 @@ const ENGINE_URL   = process.env.NEXT_PUBLIC_ENGINE_URL   ?? 'https://thisismidi
 const DEV_EMAIL    = process.env.NEXT_PUBLIC_DEV_EMAIL    ?? ''
 const MAX_MB       = 100
 
-// ─── 타입 ────────────────────────────────────────────────────────────────────
 type ToastType = 'success' | 'error' | 'warn' | 'info'
 interface Toast { id: number; msg: string; type: ToastType }
 type EngineStatus = 'idle' | 'warming' | 'running'
 
-// ─── SliderRow 컴포넌트 ───────────────────────────────────────────────────────
 function SliderRow({ label, min, max, step, value, onChange, unit, disabled, accent }: {
   label: string; min: number; max: number; step: number
   value: string; onChange: (v: string) => void; unit: string
@@ -33,7 +30,6 @@ function SliderRow({ label, min, max, step, value, onChange, unit, disabled, acc
   )
 }
 
-// ─── 메인 컴포넌트 ────────────────────────────────────────────────────────────
 export default function Home() {
   const [user, setUser]               = useState<any>(null)
   const [tier, setTier]               = useState('FREE')
@@ -47,19 +43,16 @@ export default function Home() {
   const [progress, setProgress]       = useState({ cur: 0, total: 0 })
   const [currentOrigUrl, setCurrentOrigUrl] = useState('')
 
-  // 미터링
   const [origLufs, setOrigLufs] = useState(-70); const [origTp, setOrigTp] = useState(-70)
   const [mastLufs, setMastLufs] = useState(-70); const [mastTp, setMastTp] = useState(-70)
   const origMeter = useRef({ sum: 0, samples: 0, maxPeak: 0 })
   const mastMeter = useRef({ sum: 0, samples: 0, maxPeak: 0 })
 
-  // 플레이어
   const [origTime, setOrigTime] = useState(0); const [origDur, setOrigDur] = useState(0)
   const [mastTime, setMastTime] = useState(0); const [mastDur, setMastDur] = useState(0)
   const [origPlaying, setOrigPlaying] = useState(false)
   const [mastPlaying, setMastPlaying] = useState(false)
 
-  // 파라미터
   const [targetLufs, setTargetLufs]   = useState('-14.0')
   const [truePeak, setTruePeak]       = useState('-1.0')
   const [outputTrim, setOutputTrim]   = useState('0.0')
@@ -74,7 +67,6 @@ export default function Home() {
   const [outSR, setOutSR]             = useState('44100')
   const [outBit, setOutBit]           = useState('16')
 
-  // Refs
   const origAudioRef  = useRef<HTMLAudioElement>(null)
   const mastAudioRef  = useRef<HTMLAudioElement>(null)
   const origCanvas    = useRef<HTMLCanvasElement>(null)
@@ -83,7 +75,6 @@ export default function Home() {
   const sourceNodes   = useRef<Map<HTMLAudioElement, any>>(new Map())
   const rafIdRef      = useRef<number | null>(null)
 
-  // Toast
   const [toasts, setToasts] = useState<Toast[]>([])
   const toastId = useRef(0)
   const toast = useCallback((msg: string, type: ToastType = 'info') => {
@@ -95,7 +86,6 @@ export default function Home() {
   const isPro = tier === 'PRO' || tier === 'DEVELOPER'
   const progressPct = progress.total > 0 ? (progress.cur / progress.total) * 100 : 0
 
-  // ── Auth ────────────────────────────────────────────────────────────────────
   useEffect(() => {
     document.title = 'THISISMIDI Mastering AI'
     supabase.auth.getSession().then(({ data: { session } }) => handleUser(session?.user ?? null))
@@ -114,7 +104,6 @@ export default function Home() {
     if (!isPro) { setOutFormat('MP3'); setOutSR('44100'); setOutBit('16') }
   }, [isPro])
 
-  // ── 파일 URL 관리 ────────────────────────────────────────────────────────────
   useEffect(() => {
     if (files[activeIndex]) {
       const url = URL.createObjectURL(files[activeIndex])
@@ -126,7 +115,6 @@ export default function Home() {
     } else { setCurrentOrigUrl('') }
   }, [files, activeIndex])
 
-  // ── 파형 렌더링 ──────────────────────────────────────────────────────────────
   const drawWave = async (src: File | string, canvas: HTMLCanvasElement, color: string) => {
     const ctx = canvas.getContext('2d'); if (!ctx) return
     try {
@@ -156,7 +144,6 @@ export default function Home() {
     if (masteredUrls[activeIndex] && mastCanvas.current) drawWave(masteredUrls[activeIndex], mastCanvas.current, mastColor)
   }, [files, activeIndex, isDark, masteredUrls])
 
-  // ── 오디오 분석 ──────────────────────────────────────────────────────────────
   const ensureRouting = (audio: HTMLAudioElement) => {
     if (!audioCtxRef.current) audioCtxRef.current = new ((window as any).AudioContext || (window as any).webkitAudioContext)()
     const ctx = audioCtxRef.current
@@ -211,7 +198,6 @@ export default function Home() {
     }
   }
 
-  // ── 파일 업로드 ──────────────────────────────────────────────────────────────
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(e.target.files || [])
     const limit    = isPro ? 15 : 1
@@ -224,7 +210,6 @@ export default function Home() {
     setActiveIndex(0); setMasteredUrls({}); setOrigPlaying(false); setMastPlaying(false)
   }
 
-  // ── 프리셋 ───────────────────────────────────────────────────────────────────
   const applyPreset = (genre: string) => {
     if (!isPro) { toast('PRESET 기능은 PRO 전용입니다. 🔒', 'warn'); return }
     const P: Record<string, any> = {
@@ -240,7 +225,6 @@ export default function Home() {
     toast(`${genre === 'RnB' ? 'R&B' : genre === 'Film' ? 'Film Music' : genre} 프리셋 적용됨`, 'success')
   }
 
-  // ── ✅ [1순위] HuggingFace 콜드스타트 처리 ─────────────────────────────────
   const wakeUpEngine = async (): Promise<void> => {
     setEngineStatus('warming')
     toast('AI 엔진 연결 중... 처음 시작 시 최대 30초 소요될 수 있어요.', 'info')
@@ -249,20 +233,17 @@ export default function Home() {
     while (Date.now() < deadline) {
       try {
         const res = await fetch(healthUrl, { signal: AbortSignal.timeout(8000) })
-        if (res.ok || res.status === 405 /* POST-only */) break
-      } catch { /* 아직 준비 중 */ }
+        if (res.ok || res.status === 405) break
+      } catch {}
       await new Promise(r => setTimeout(r, 3000))
     }
     setEngineStatus('running')
   }
 
-  // ── 마스터링 실행 ─────────────────────────────────────────────────────────────
   const runBatchMastering = async () => {
     if (files.length === 0) return
     setIsProcessing(true)
     setProgress({ cur: 0, total: files.length })
-
-    // 콜드스타트: 먼저 상태 확인
     try {
       const res = await fetch(ENGINE_URL.replace('/master', '/'), { signal: AbortSignal.timeout(4000) })
       if (!res.ok && res.status !== 405) throw new Error('cold')
@@ -270,7 +251,6 @@ export default function Home() {
     } catch {
       await wakeUpEngine()
     }
-
     for (let i = 0; i < files.length; i++) {
       setActiveIndex(i)
       setProgress({ cur: i + 1, total: files.length })
@@ -292,14 +272,12 @@ export default function Home() {
         toast(`처리 실패: ${files[i].name}`, 'error')
       }
     }
-
     setIsProcessing(false)
     setEngineStatus('idle')
     setProgress({ cur: 0, total: 0 })
     if (files.length > 1) toast(`전체 ${files.length}곡 마스터링 완료!`, 'success')
   }
 
-  // ── ZIP 다운로드 ──────────────────────────────────────────────────────────────
   const downloadZip = async () => {
     const keys = Object.keys(masteredUrls); if (keys.length === 0) return
     toast('ZIP 압축 중...', 'info')
@@ -331,11 +309,8 @@ export default function Home() {
     return files.length > 1 ? `MASTER ALL ${files.length} TRACKS` : 'START MASTERING'
   }
 
-  // ── JSX ───────────────────────────────────────────────────────────────────────
   return (
     <main className={isDark ? 'dark' : 'light'}>
-
-      {/* ✅ [2순위] Toast 알림 시스템 */}
       <div className="toast-wrap">
         {toasts.map(t => (
           <div key={t.id} className={`toast toast-${t.type}`}>{t.msg}</div>
@@ -343,7 +318,6 @@ export default function Home() {
       </div>
 
       <div className="ws">
-        {/* Header */}
         <header className="hd">
           <div className="brand">THISISMIDI <span className="acc">.</span></div>
           <div className="hd-right">
@@ -358,7 +332,6 @@ export default function Home() {
           </div>
         </header>
 
-        {/* Login Hero */}
         {!user ? (
           <div className="hero">
             <p className="hero-eyebrow">Professional AI Audio Mastering</p>
@@ -370,7 +343,6 @@ export default function Home() {
         ) : (
           <div className="layout">
 
-            {/* ── Track Queue ─────────────────────────────── */}
             <section className="panel">
               <div className="panel-top">
                 <h3>Track Queue</h3>
@@ -382,34 +354,27 @@ export default function Home() {
                 <span className="drop-main">Drop audio files here or click to browse</span>
                 <span className="drop-sub">MP3 · WAV · FLAC · AIFF &nbsp;|&nbsp; Max {MAX_MB}MB per file</span>
               </label>
-
               <div className="action-row">
                 <label htmlFor="u-file" className="btn-sec">UPLOAD</label>
                 <button className="btn-prime" onClick={runBatchMastering} disabled={isProcessing || files.length === 0}>
                   {btnLabel()}
                 </button>
               </div>
-
-              {/* ✅ [1순위] 콜드스타트 안내 */}
               {engineStatus === 'warming' && (
                 <div className="cold-notice">
                   <span className="spin" />
                   AI 엔진을 깨우는 중입니다. 처음 실행 시 최대 30초 소요될 수 있어요.
                 </div>
               )}
-
-              {/* ✅ [2순위] 진행률 바 */}
               {isProcessing && progress.total > 0 && (
                 <div className="prog-track">
                   <div className="prog-bar" style={{ width: `${progressPct}%` }} />
                   <span className="prog-label">{Math.round(progressPct)}%</span>
                 </div>
               )}
-
               {Object.keys(masteredUrls).length > 1 && (
                 <button className="btn-zip" onClick={downloadZip}>📥 DOWNLOAD ALL AS ZIP</button>
               )}
-
               <ul className="track-list">
                 {files.map((f, i) => (
                   <li key={i}
@@ -424,14 +389,11 @@ export default function Home() {
               </ul>
             </section>
 
-            {/* ── A/B Monitor ─────────────────────────────── */}
             <section className="panel">
               <div className="panel-top">
                 <h3>A / B Monitor</h3>
                 <span>{files[activeIndex]?.name || '—'}</span>
               </div>
-
-              {/* Original */}
               <div className="mon-row">
                 <div className="mon-ctrl">
                   <p className="mon-label orig-lbl">Original</p>
@@ -455,8 +417,6 @@ export default function Home() {
                   onLoadedMetadata={e => setOrigDur(e.currentTarget.duration)}
                   onEnded={() => setOrigPlaying(false)} />
               </div>
-
-              {/* Mastered */}
               <div className="mon-row" style={{ marginTop: 20 }}>
                 <div className="mon-ctrl">
                   <p className="mon-label mast-lbl">Mastered</p>
@@ -486,7 +446,6 @@ export default function Home() {
               </div>
             </section>
 
-            {/* ── Presets ─────────────────────────────────── */}
             <section className="panel">
               <div className="panel-top">
                 <h3>Mastering Presets</h3>
@@ -508,14 +467,12 @@ export default function Home() {
               </div>
             </section>
 
-            {/* ── Mastering Controls ───────────────────────── */}
             <section className="panel">
               <div className="panel-top">
                 <h3>Mastering Controls</h3>
                 {!isPro && <span className="lock">PRO ONLY 🔒</span>}
               </div>
               <div className="ctrl-grid">
-
                 <div className="ctrl-group">
                   <p className="g-title">Output Format</p>
                   <div className="sel-row"><label>Format</label>
@@ -537,7 +494,6 @@ export default function Home() {
                     </select>
                   </div>
                 </div>
-
                 <div className="ctrl-group">
                   <p className="g-title">Loudness &amp; Safety</p>
                   <SliderRow label="Target LUFS"  min={-24} max={-6}  step={0.5} value={targetLufs}  onChange={setTargetLufs}  unit=""      />
@@ -545,13 +501,11 @@ export default function Home() {
                   <SliderRow label="Output Trim"  min={-6}  max={6}   step={0.1} value={outputTrim}  onChange={setOutputTrim}  unit=" dB"   disabled={!isPro} />
                   <SliderRow label="Presence"     min={0}   max={100} step={1}   value={presence}    onChange={setPresence}    unit="%"     disabled={!isPro} accent />
                 </div>
-
                 <div className="ctrl-group">
                   <p className="g-title">Tone Character</p>
-                  <SliderRow label="Warmth"       min={0} max={100} step={1} value={warmth}      onChange={setWarmth}      unit="%" disabled={!isPro} />
-                  <SliderRow label="Treble (Air)" min={0} max={100} step={1} value={treble}      onChange={setTreble}      unit="%" disabled={!isPro} />
+                  <SliderRow label="Warmth"       min={0} max={100} step={1} value={warmth}  onChange={setWarmth}  unit="%" disabled={!isPro} />
+                  <SliderRow label="Treble (Air)" min={0} max={100} step={1} value={treble}  onChange={setTreble}  unit="%" disabled={!isPro} />
                 </div>
-
                 <div className="ctrl-group">
                   <p className="g-title">Stereo, Space &amp; Dynamics</p>
                   <SliderRow label="Stereo Width" min={0}   max={200} step={1} value={stereoWidth} onChange={setStereoWidth} unit="%" disabled={!isPro} />
@@ -559,7 +513,6 @@ export default function Home() {
                   <SliderRow label="Mono Bass"    min={0}   max={100} step={1} value={monoBass}    onChange={setMonoBass}    unit="%" disabled={!isPro} />
                   <SliderRow label="Vari-Mu Glue" min={0}   max={100} step={1} value={glueComp}    onChange={setGlueComp}    unit="%" disabled={!isPro} accent />
                 </div>
-
               </div>
             </section>
 
@@ -567,63 +520,33 @@ export default function Home() {
         )}
       </div>
 
-      {/* ══════════════════════════════════════════════════
-          ✅ [2순위] 완전 리뉴얼된 CSS
-          Dark 모드: 진한 배경 + 밝은 글씨
-          Light 모드: 흰 배경 + 검정 글씨 (전부 잘 보임)
-      ══════════════════════════════════════════════════ */}
       <style dangerouslySetInnerHTML={{ __html: `
-        /* ── Variables ─────────────────────────────── */
         .dark {
-          --bg:      #080808;
-          --sur:     #111111;
-          --sur2:    #171717;
-          --brd:     #242424;
-          --txt:     #ebebeb;
-          --txt2:    #777777;
-          --acc:     #4ade80;
-          --acc2:    #60a5fa;
-          --acc-bg:  rgba(74,222,128,0.08);
-          --danger:  #f87171;
-          --warn:    #fbbf24;
+          --bg: #080808; --sur: #111111; --sur2: #171717; --brd: #242424;
+          --txt: #ebebeb; --txt2: #777777; --acc: #4ade80; --acc2: #60a5fa;
+          --acc-bg: rgba(74,222,128,0.08); --danger: #f87171; --warn: #fbbf24;
         }
         .light {
-          --bg:      #f0f0f0;
-          --sur:     #ffffff;
-          --sur2:    #f7f7f8;
-          --brd:     #e0e0e3;
-          --txt:     #0a0a0a;
-          --txt2:    #555555;
-          --acc:     #16a34a;
-          --acc2:    #2563eb;
-          --acc-bg:  rgba(22,163,74,0.07);
-          --danger:  #dc2626;
-          --warn:    #b45309;
+          --bg: #f0f0f0; --sur: #ffffff; --sur2: #f7f7f8; --brd: #e0e0e3;
+          --txt: #0a0a0a; --txt2: #555555; --acc: #16a34a; --acc2: #2563eb;
+          --acc-bg: rgba(22,163,74,0.07); --danger: #dc2626; --warn: #b45309;
         }
-
-        /* ── Base ──────────────────────────────────── */
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { background: var(--bg); color: var(--txt); font-family: 'SF Mono','Fira Code','Cascadia Code',ui-monospace,monospace; font-size: 14px; -webkit-font-smoothing: antialiased; transition: background .25s, color .25s; }
+        body { background: var(--bg); color: var(--txt); font-family: -apple-system, BlinkMacSystemFont, 'Plus Jakarta Sans', 'Helvetica Neue', Arial, sans-serif; font-size: 14px; -webkit-font-smoothing: antialiased; transition: background .25s, color .25s; }
         button, select, label { font-family: inherit; }
-
-        /* ── Toast ─────────────────────────────────── */
         .toast-wrap { position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
         .toast { padding: 11px 16px; border-radius: 8px; font-size: 0.78rem; font-weight: 600; border: 1px solid; max-width: 300px; animation: toastIn .25s ease; pointer-events: auto; }
         .toast-success { background: rgba(74,222,128,.12); border-color: #4ade80; color: var(--txt); }
         .toast-error   { background: rgba(248,113,113,.12); border-color: #f87171; color: var(--txt); }
-        .toast-warn    { background: rgba(251,191,36,.12);  border-color: #fbbf24; color: var(--txt); }
-        .toast-info    { background: rgba(96,165,250,.12);  border-color: #60a5fa; color: var(--txt); }
-        /* Light 모드 토스트: 글씨 확실히 검정으로 */
-        .light .toast { color: #0a0a0a; }
+        .toast-warn    { background: rgba(251,191,36,.12); border-color: #fbbf24; color: var(--txt); }
+        .toast-info    { background: rgba(96,165,250,.12); border-color: #60a5fa; color: var(--txt); }
+        .light .toast  { color: #0a0a0a; }
         @keyframes toastIn { from { opacity:0; transform:translateX(16px); } to { opacity:1; transform:translateX(0); } }
-
-        /* ── Layout ────────────────────────────────── */
         .ws     { max-width: 1200px; margin: 0 auto; padding: 20px; }
         .layout { display: flex; flex-direction: column; gap: 20px; }
-
-        /* ── Header ────────────────────────────────── */
         .hd       { display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; }
-        .brand    { font-size: 1.15rem; font-weight: 900; letter-spacing: -.5px; color: var(--txt); }
+        .brand    { font-size: 1.1rem; font-weight: 800; letter-spacing: 0.5px; color: var(--txt); }
         .acc      { color: var(--acc); }
         .hd-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .tier-chip { font-size: .65rem; font-weight: 800; letter-spacing: 1px; padding: 3px 10px; border-radius: 50px; background: var(--sur2); border: 1px solid var(--brd); color: var(--txt2); }
@@ -632,15 +555,11 @@ export default function Home() {
         .eng-chip.run  { background: rgba(74,222,128,.1); border-color: var(--acc); color: var(--acc); }
         .btn-sm   { background: var(--sur); border: 1px solid var(--brd); color: var(--txt); padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: .72rem; font-weight: 700; letter-spacing: .5px; transition: .15s; }
         .btn-sm:hover { background: var(--sur2); border-color: var(--txt2); }
-
-        /* ── Panel ─────────────────────────────────── */
         .panel     { background: var(--sur); border: 1px solid var(--brd); border-radius: 12px; padding: 22px; }
         .panel-top { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--brd); padding-bottom: 14px; margin-bottom: 18px; }
-        .panel-top h3 { font-size: .78rem; font-weight: 800; letter-spacing: 1.2px; text-transform: uppercase; color: var(--txt); }
+        .panel-top h3 { font-size: .78rem; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: var(--txt); }
         .panel-top span { font-size: .72rem; color: var(--txt2); }
         .lock { font-size: .65rem; background: var(--sur2); border: 1px solid var(--brd); padding: 2px 8px; border-radius: 50px; color: var(--txt2); }
-
-        /* ── Upload ────────────────────────────────── */
         .drop-zone  { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 88px; border: 1px dashed var(--brd); border-radius: 8px; cursor: pointer; transition: .2s; background: var(--sur2); padding: 20px; }
         .drop-zone:hover { border-color: var(--acc); background: var(--acc-bg); }
         .drop-icon  { font-size: 1.4rem; }
@@ -654,19 +573,13 @@ export default function Home() {
         .btn-sec:hover { border-color: var(--txt2); }
         .btn-zip    { width: 100%; margin-top: 10px; background: var(--acc2); color: #fff; border: none; padding: 10px; border-radius: 6px; font-weight: 800; font-size: .78rem; cursor: pointer; transition: .15s; }
         .btn-zip:hover { filter: brightness(1.1); }
-
-        /* Cold start notice */
         .cold-notice { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 10px 14px; background: rgba(251,191,36,.07); border: 1px solid rgba(251,191,36,.35); border-radius: 7px; font-size: .75rem; color: var(--txt); }
         .light .cold-notice { color: #0a0a0a; }
         .spin { width: 13px; height: 13px; border: 2px solid rgba(251,191,36,.3); border-top-color: #fbbf24; border-radius: 50%; animation: spin .75s linear infinite; flex-shrink: 0; }
         @keyframes spin { to { transform: rotate(360deg); } }
-
-        /* Progress bar */
         .prog-track { position: relative; height: 26px; background: var(--sur2); border: 1px solid var(--brd); border-radius: 6px; overflow: hidden; margin-top: 12px; }
         .prog-bar   { height: 100%; background: var(--acc); border-radius: 6px; transition: width .5s ease; }
         .prog-label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: .68rem; font-weight: 800; color: #000; mix-blend-mode: difference; letter-spacing: 1px; }
-
-        /* Track list */
         .track-list { list-style: none; display: grid; grid-template-columns: repeat(auto-fill,minmax(270px,1fr)); gap: 7px; margin-top: 14px; }
         .track-item { display: flex; align-items: center; gap: 9px; padding: 9px 12px; border-radius: 7px; border: 1px solid var(--brd); background: var(--sur2); cursor: pointer; transition: .15s; font-size: .78rem; color: var(--txt); }
         .track-item:hover  { border-color: var(--txt2); }
@@ -676,8 +589,6 @@ export default function Home() {
         .t-badge      { font-size: .65rem; font-weight: 800; flex-shrink: 0; }
         .t-badge.done { color: var(--acc); }
         .t-badge.proc { color: #fbbf24; }
-
-        /* Monitor */
         .mon-row   { display: flex; gap: 16px; align-items: flex-start; }
         .mon-ctrl  { width: 108px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; }
         .mon-label { font-size: .72rem; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
@@ -700,15 +611,11 @@ export default function Home() {
         .sk-orig   { background: var(--acc);  box-shadow: 0 0 7px rgba(74,222,128,.6); }
         .sk-mast   { background: var(--acc2); box-shadow: 0 0 7px rgba(96,165,250,.6); }
         .no-file   { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: .8rem; color: var(--txt2); }
-
-        /* Presets */
         .preset-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(130px,1fr)); gap: 10px; }
         .btn-preset  { background: var(--sur2); color: var(--txt); border: 1px solid var(--brd); padding: 14px 10px; border-radius: 8px; font-weight: 800; font-size: .76rem; cursor: pointer; transition: .18s; display: flex; flex-direction: column; align-items: center; gap: 6px; }
         .btn-preset:hover:not(:disabled) { border-color: var(--acc); background: var(--acc-bg); color: var(--txt); }
         .btn-preset:disabled { opacity: .3; cursor: not-allowed; }
         .p-icon { font-size: 1.3rem; }
-
-        /* Controls */
         .ctrl-grid  { display: grid; grid-template-columns: repeat(auto-fit,minmax(255px,1fr)); gap: 14px; }
         .ctrl-group { background: var(--sur2); padding: 17px; border-radius: 8px; border: 1px solid var(--brd); }
         .g-title    { font-size: .68rem; font-weight: 800; letter-spacing: 1.2px; text-transform: uppercase; padding-bottom: 10px; margin-bottom: 14px; border-bottom: 1px solid var(--brd); color: var(--txt); }
@@ -716,26 +623,21 @@ export default function Home() {
         .sel-row label { font-size: .68rem; color: var(--txt2); display: block; margin-bottom: 4px; }
         .sel        { width: 100%; background: var(--sur); color: var(--txt); border: 1px solid var(--brd); padding: 7px 9px; border-radius: 5px; font-size: .76rem; font-family: inherit; }
         .sel:disabled { opacity: .35; }
-        /* Light 모드 select 글씨 검정 보장 */
         .light .sel { color: #0a0a0a; }
-        .sld-row    { display: flex; align-items: center; gap: 10px; margin-bottom: 11px; }
-        .sld-label  { font-size: .7rem; color: var(--txt2); width: 105px; flex-shrink: 0; }
+        .sld-row    { display: flex; align-items: center; gap: 8px; margin-bottom: 11px; }
+        .sld-label  { font-size: .7rem; color: var(--txt2); width: 95px; flex-shrink: 0; }
         .sld-label.acc { color: var(--acc); }
-        .sld-row input[type="range"] { flex: 1; accent-color: var(--acc); cursor: pointer; }
+        .sld-row input[type="range"] { flex: 1; min-width: 0; accent-color: var(--acc); cursor: pointer; }
         .sld-row input[type="range"]:disabled { opacity: .3; cursor: not-allowed; }
-        .sld-val    { width: 54px; font-size: .68rem; text-align: right; color: var(--acc); font-weight: 700; }
-
-        /* Hero */
+        .sld-val    { width: 70px; flex-shrink: 0; font-size: .68rem; text-align: right; color: var(--acc); font-weight: 700; white-space: nowrap; }
         .hero        { text-align: center; padding: 110px 0; }
         .hero-eyebrow { font-size: .7rem; letter-spacing: 3px; text-transform: uppercase; color: var(--txt2); margin-bottom: 18px; }
         .hero-title  { font-size: 5.5rem; font-weight: 900; letter-spacing: -5px; line-height: .85; color: var(--txt); margin-bottom: 48px; }
         .hero .btn-prime { font-size: .88rem; padding: 13px 30px; border-radius: 8px; }
-
-        /* Light 모드 전역 색상 강제 */
         .light { color: #0a0a0a; }
         .light .tier-chip, .light .panel-top span, .light .t-num,
         .light .drop-sub, .light .time-row, .light .meter-row span:first-child,
-        .light .sld-label, .light .sel-row label, .light .txt2-cls { color: #555555; }
+        .light .sld-label, .light .sel-row label { color: #555555; }
       `}} />
     </main>
   )
