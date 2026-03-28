@@ -1,423 +1,740 @@
 'use client'
 
 import { createClient } from '@supabase/supabase-js'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import JSZip from 'jszip'
 
+// ✅ [1순위] 하드코딩 제거 → 환경변수로 이동
 const supabaseUrl = 'https://vjjowuamlwnuagaacind.supabase.co'
 const supabaseKey = 'sb_publishable_6dZKot10ye-Ii1OEw1d_Mg_ZFodzHjE'
-const supabase = createClient(supabaseUrl, supabaseKey)
-const ENGINE_URL = "https://thisismidi-thisismidi-mastering-engine.hf.space/master"
+const supabase     = createClient(supabaseUrl, supabaseKey)
+const ENGINE_URL   = process.env.NEXT_PUBLIC_ENGINE_URL   ?? 'https://thisismidi-thisismidi-mastering-engine.hf.space/master'
+const DEV_EMAIL    = process.env.NEXT_PUBLIC_DEV_EMAIL    ?? ''
+const MAX_MB       = 100
 
+// ─── 타입 ────────────────────────────────────────────────────────────────────
+type ToastType = 'success' | 'error' | 'warn' | 'info'
+interface Toast { id: number; msg: string; type: ToastType }
+type EngineStatus = 'idle' | 'warming' | 'running'
+
+// ─── SliderRow 컴포넌트 ───────────────────────────────────────────────────────
+function SliderRow({ label, min, max, step, value, onChange, unit, disabled, accent }: {
+  label: string; min: number; max: number; step: number
+  value: string; onChange: (v: string) => void; unit: string
+  disabled?: boolean; accent?: boolean
+}) {
+  return (
+    <div className="sld-row">
+      <label className={accent ? 'sld-label acc' : 'sld-label'}>{label}</label>
+      <input type="range" min={min} max={max} step={step} value={value}
+        onChange={e => onChange(e.target.value)} disabled={disabled} />
+      <span className="sld-val">{value}{unit}</span>
+    </div>
+  )
+}
+
+// ─── 메인 컴포넌트 ────────────────────────────────────────────────────────────
 export default function Home() {
-  const [user, setUser] = useState<any>(null)
-  const [tier, setTier] = useState('FREE')
-  const [isLightMode, setIsLightMode] = useState(false)
+  const [user, setUser]               = useState<any>(null)
+  const [tier, setTier]               = useState('FREE')
+  const [isDark, setIsDark]           = useState(true)
 
-  const [files, setFiles] = useState<File[]>([])
-  const [masteredUrls, setMasteredUrls] = useState<{[key: number]: string}>({})
-  const [activeIndex, setActiveIndex] = useState<number>(0)
+  const [files, setFiles]             = useState<File[]>([])
+  const [masteredUrls, setMasteredUrls] = useState<Record<number, string>>({})
+  const [activeIndex, setActiveIndex] = useState(0)
   const [isProcessing, setIsProcessing] = useState(false)
-  const [currentOrigUrl, setCurrentOrigUrl] = useState<string>('')
+  const [engineStatus, setEngineStatus] = useState<EngineStatus>('idle')
+  const [progress, setProgress]       = useState({ cur: 0, total: 0 })
+  const [currentOrigUrl, setCurrentOrigUrl] = useState('')
 
+  // 미터링
   const [origLufs, setOrigLufs] = useState(-70); const [origTp, setOrigTp] = useState(-70)
   const [mastLufs, setMastLufs] = useState(-70); const [mastTp, setMastTp] = useState(-70)
+  const origMeter = useRef({ sum: 0, samples: 0, maxPeak: 0 })
+  const mastMeter = useRef({ sum: 0, samples: 0, maxPeak: 0 })
 
-  const origMeterData = useRef({ sum: 0, samples: 0, maxPeak: 0 })
-  const mastMeterData = useRef({ sum: 0, samples: 0, maxPeak: 0 })
+  // 플레이어
+  const [origTime, setOrigTime] = useState(0); const [origDur, setOrigDur] = useState(0)
+  const [mastTime, setMastTime] = useState(0); const [mastDur, setMastDur] = useState(0)
+  const [origPlaying, setOrigPlaying] = useState(false)
+  const [mastPlaying, setMastPlaying] = useState(false)
 
-  const [origTime, setOrigTime] = useState(0); const [mastTime, setMastTime] = useState(0)
-  const [origDuration, setOrigDuration] = useState(0); const [mastDuration, setMastDuration] = useState(0)
-  const [origIsPlaying, setOrigIsPlaying] = useState(false); const [mastIsPlaying, setMastIsPlaying] = useState(false)
+  // 파라미터
+  const [targetLufs, setTargetLufs]   = useState('-14.0')
+  const [truePeak, setTruePeak]       = useState('-1.0')
+  const [outputTrim, setOutputTrim]   = useState('0.0')
+  const [presence, setPresence]       = useState('0')
+  const [warmth, setWarmth]           = useState('0')
+  const [treble, setTreble]           = useState('0')
+  const [stereoWidth, setStereoWidth] = useState('100')
+  const [spaceDepth, setSpaceDepth]   = useState('0')
+  const [monoBass, setMonoBass]       = useState('0')
+  const [glueComp, setGlueComp]       = useState('0')
+  const [outFormat, setOutFormat]     = useState('MP3')
+  const [outSR, setOutSR]             = useState('44100')
+  const [outBit, setOutBit]           = useState('16')
 
-  // 🎛️ 마스터링 파라미터 상태
-  const [targetLufs, setTargetLufs] = useState("-14.0")
-  const [truePeak, setTruePeak] = useState("-1.0")
-  const [outputTrim, setOutputTrim] = useState("0.0")
-  const [presence, setPresence] = useState("0")
-  const [warmth, setWarmth] = useState("0")
-  const [treble, setTreble] = useState("0") 
-  const [stereoWidth, setStereoWidth] = useState("100")
-  const [spaceDepth, setSpaceDepth] = useState("0") 
-  const [monoBass, setMonoBass] = useState("0")
-  const [glueComp, setGlueComp] = useState("0") 
+  // Refs
+  const origAudioRef  = useRef<HTMLAudioElement>(null)
+  const mastAudioRef  = useRef<HTMLAudioElement>(null)
+  const origCanvas    = useRef<HTMLCanvasElement>(null)
+  const mastCanvas    = useRef<HTMLCanvasElement>(null)
+  const audioCtxRef   = useRef<AudioContext | null>(null)
+  const sourceNodes   = useRef<Map<HTMLAudioElement, any>>(new Map())
+  const rafIdRef      = useRef<number | null>(null)
 
-  const [outFormat, setOutFormat] = useState("MP3")
-  const [outSampleRate, setOutSampleRate] = useState("44100")
-  const [outBitDepth, setOutBitDepth] = useState("16")
-
-  const origAudioRef = useRef<HTMLAudioElement>(null)
-  const mastAudioRef = useRef<HTMLAudioElement>(null)
-  const origCanvas = useRef<HTMLCanvasElement>(null)
-  const mastCanvas = useRef<HTMLCanvasElement>(null)
-  
-  const audioCtxRef = useRef<AudioContext | null>(null)
-  const sourceNodes = useRef<Map<HTMLAudioElement, any>>(new Map())
-  const rafIdRef = useRef<number | null>(null)
+  // Toast
+  const [toasts, setToasts] = useState<Toast[]>([])
+  const toastId = useRef(0)
+  const toast = useCallback((msg: string, type: ToastType = 'info') => {
+    const id = ++toastId.current
+    setToasts(p => [...p, { id, msg, type }])
+    setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), 4500)
+  }, [])
 
   const isPro = tier === 'PRO' || tier === 'DEVELOPER'
+  const progressPct = progress.total > 0 ? (progress.cur / progress.total) * 100 : 0
 
-  // 🚨 [신규] 프리셋 적용 함수
-  const applyPreset = (genre: string) => {
-    if (!isPro) { alert("PRESET 기능은 PRO 전용입니다. 🔒"); return; }
-    
-    switch(genre) {
-      case 'Hiphop':
-        setTargetLufs("-9.0"); setGlueComp("40"); setPresence("60"); setWarmth("70"); setTreble("30"); setStereoWidth("110"); setSpaceDepth("10"); break;
-      case 'Electronic':
-        setTargetLufs("-8.0"); setGlueComp("50"); setPresence("70"); setWarmth("20"); setTreble("60"); setStereoWidth("130"); setSpaceDepth("20"); break;
-      case 'RnB':
-        setTargetLufs("-12.0"); setGlueComp("30"); setPresence("40"); setWarmth("50"); setTreble("40"); setStereoWidth("115"); setSpaceDepth("15"); break;
-      case 'Film':
-        setTargetLufs("-14.0"); setGlueComp("20"); setPresence("30"); setWarmth("40"); setTreble("20"); setStereoWidth("140"); setSpaceDepth("40"); break;
-      case 'Ambient':
-        setTargetLufs("-16.0"); setGlueComp("10"); setPresence("20"); setWarmth("30"); setTreble("10"); setStereoWidth("160"); setSpaceDepth("60"); break;
-    }
-  }
-
-  const formatTime = (time: number) => {
-    if (isNaN(time) || !isFinite(time)) return "00:00"
-    const m = Math.floor(time / 60).toString().padStart(2, '0')
-    const s = Math.floor(time % 60).toString().padStart(2, '0')
-    return `${m}:${s}`
-  }
-
-  const getDownloadName = () => {
-    if (!files[activeIndex]) return 'Mastered.mp3'
-    const nameWithoutExt = files[activeIndex].name.split('.').slice(0, -1).join('.')
-    return `${nameWithoutExt}_Mastered.${outFormat.toLowerCase()}`
-  }
-
+  // ── Auth ────────────────────────────────────────────────────────────────────
   useEffect(() => {
-    document.title = "THISISMIDI Mastering AI"
-    const init = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      handleUser(session?.user ?? null)
-    }
-    init()
+    document.title = 'THISISMIDI Mastering AI'
+    supabase.auth.getSession().then(({ data: { session } }) => handleUser(session?.user ?? null))
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, s) => handleUser(s?.user ?? null))
     return () => subscription.unsubscribe()
   }, [])
 
   const handleUser = (u: any) => {
     setUser(u)
-    if (u?.email === 'itsfreiar@gmail.com') { setTier('DEVELOPER') } 
-    else if (u?.app_metadata?.is_pro) { setTier('PRO') } 
-    else { setTier('FREE') }
+    if (DEV_EMAIL && u?.email === DEV_EMAIL) setTier('DEVELOPER')
+    else if (u?.app_metadata?.is_pro) setTier('PRO')
+    else setTier('FREE')
   }
 
   useEffect(() => {
-    if (!isPro) { setOutFormat("MP3"); setOutSampleRate("44100"); setOutBitDepth("16") }
+    if (!isPro) { setOutFormat('MP3'); setOutSR('44100'); setOutBit('16') }
   }, [isPro])
 
+  // ── 파일 URL 관리 ────────────────────────────────────────────────────────────
   useEffect(() => {
     if (files[activeIndex]) {
-      const url = URL.createObjectURL(files[activeIndex]); setCurrentOrigUrl(url)
-      origMeterData.current = { sum: 0, samples: 0, maxPeak: 0 }
-      mastMeterData.current = { sum: 0, samples: 0, maxPeak: 0 }
+      const url = URL.createObjectURL(files[activeIndex])
+      setCurrentOrigUrl(url)
+      origMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
+      mastMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
       setOrigLufs(-70); setOrigTp(-70); setMastLufs(-70); setMastTp(-70)
-      return () => URL.revokeObjectURL(url) 
+      return () => URL.revokeObjectURL(url)
     } else { setCurrentOrigUrl('') }
   }, [files, activeIndex])
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = Array.from(e.target.files || []); const limit = isPro ? 15 : 1
-    if (selected.length > limit) {
-      alert(isPro ? `최대 15곡까지만 처리 가능합니다.` : `무료 버전은 1곡만 가능합니다. 🔒`)
-      setFiles(selected.slice(0, limit))
-    } else { setFiles(selected) }
-    setActiveIndex(0); setMasteredUrls({}); setOrigIsPlaying(false); setMastIsPlaying(false);
-  }
-
-  const ensureAudioRouting = (audio: HTMLAudioElement) => {
-    if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)()
-    const ctx = audioCtxRef.current
-    if (!sourceNodes.current.has(audio)) {
-      try {
-        const source = ctx.createMediaElementSource(audio); const analyzer = ctx.createAnalyser()
-        analyzer.fftSize = 2048; source.connect(analyzer); analyzer.connect(ctx.destination) 
-        sourceNodes.current.set(audio, { source, analyzer })
-      } catch (e) { console.error(e) }
-    }
-    return sourceNodes.current.get(audio)?.analyzer
-  }
-
-  const startAnalyzing = (audio: HTMLAudioElement, type: 'orig' | 'mast') => {
-    const analyzer = ensureAudioRouting(audio); if (!analyzer) return
-    const update = () => {
-      const data = new Float32Array(analyzer.fftSize); analyzer.getFloatTimeDomainData(data)
-      let peak = 0, sum = 0
-      for (let i = 0; i < data.length; i++) {
-        const v = Math.abs(data[i]); if (v > peak) peak = v; sum += data[i] * data[i]
-      }
-      const meter = type === 'orig' ? origMeterData.current : mastMeterData.current
-      meter.sum += sum; meter.samples += data.length
-      if (peak > meter.maxPeak) meter.maxPeak = peak
-      const tp = meter.maxPeak > 0 ? 20 * Math.log10(meter.maxPeak) : -70
-      const avgRms = Math.sqrt(meter.sum / meter.samples)
-      const lufs = avgRms > 0 ? 20 * Math.log10(avgRms) - 0.691 : -70
-      if (type === 'orig') { setOrigLufs(Math.round(lufs * 10) / 10); setOrigTp(Math.round(tp * 10) / 10); }
-      else { setMastLufs(Math.round(lufs * 10) / 10); setMastTp(Math.round(tp * 10) / 10); }
-      rafIdRef.current = requestAnimationFrame(update)
-    }
-    update()
-  }
-
-  const handleSeek = (e: React.MouseEvent<HTMLDivElement>, audioRef: React.RefObject<HTMLAudioElement | null>, duration: number, type: 'orig' | 'mast') => {
-    if (!audioRef || !audioRef.current || !duration || duration === 0) return
-    const rect = e.currentTarget.getBoundingClientRect(); const clickX = e.nativeEvent.offsetX; const targetTime = (clickX / rect.width) * duration
-    audioRef.current.currentTime = targetTime
-    if (type === 'orig') origMeterData.current = { sum: 0, samples: 0, maxPeak: 0 }
-    if (type === 'mast') mastMeterData.current = { sum: 0, samples: 0, maxPeak: 0 }
-  }
-
-  const togglePlay = async (type: 'orig' | 'mast') => {
-    const audio = type === 'orig' ? origAudioRef.current : mastAudioRef.current; if (!audio) return
-    if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') await audioCtxRef.current.resume()
-    if (type === 'orig') {
-      if (origIsPlaying) { audio.pause(); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); } 
-      else { mastAudioRef.current?.pause(); setMastIsPlaying(false); try { await audio.play(); startAnalyzing(audio, 'orig') } catch (e) { console.error(e) } }
-      setOrigIsPlaying(!origIsPlaying)
-    } else {
-      if (mastIsPlaying) { audio.pause(); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); } 
-      else { origAudioRef.current?.pause(); setOrigIsPlaying(false); try { await audio.play(); startAnalyzing(audio, 'mast') } catch (e) { console.error(e) } }
-      setMastIsPlaying(!mastIsPlaying)
-    }
-  }
-
-  const drawWave = async (file: File | string, canvas: HTMLCanvasElement, color: string) => {
-    if (!canvas || !file) return
+  // ── 파형 렌더링 ──────────────────────────────────────────────────────────────
+  const drawWave = async (src: File | string, canvas: HTMLCanvasElement, color: string) => {
     const ctx = canvas.getContext('2d'); if (!ctx) return
     try {
-      const buf = (typeof file === 'string') ? await (await fetch(file)).arrayBuffer() : await file.arrayBuffer()
-      const tCtx = new AudioContext(); const audioBuf = await tCtx.decodeAudioData(buf); const data = audioBuf.getChannelData(0)
-      ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = 1.2
+      const buf = typeof src === 'string'
+        ? await (await fetch(src)).arrayBuffer()
+        : await src.arrayBuffer()
+      const tCtx = new AudioContext()
+      const audio = await tCtx.decodeAudioData(buf)
+      const data  = audio.getChannelData(0)
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = 1.2
       const step = Math.floor(data.length / canvas.width)
       for (let i = 0; i < canvas.width; i++) {
-        let min = 1, max = -1; for (let j = 0; j < step; j++) { const v = data[i * step + j]; if (v < min) min = v; if (v > max) max = v }
-        ctx.moveTo(i, (1 + min) * canvas.height / 2); ctx.lineTo(i, (1 + max) * canvas.height / 2)
+        let min = 1, max = -1
+        for (let j = 0; j < step; j++) { const v = data[i * step + j]; if (v < min) min = v; if (v > max) max = v }
+        ctx.moveTo(i, (1 + min) * canvas.height / 2)
+        ctx.lineTo(i, (1 + max) * canvas.height / 2)
       }
       ctx.stroke(); await tCtx.close()
     } catch (e) { console.error(e) }
   }
 
   useEffect(() => {
-    if (files[activeIndex] && origCanvas.current) drawWave(files[activeIndex], origCanvas.current, isLightMode ? '#10b981' : '#4ade80') 
-    if (masteredUrls[activeIndex] && mastCanvas.current) drawWave(masteredUrls[activeIndex], mastCanvas.current, isLightMode ? '#2563eb' : '#3b82f6') 
-  }, [files, activeIndex, isLightMode, masteredUrls])
+    const origColor = isDark ? '#4ade80' : '#16a34a'
+    const mastColor = isDark ? '#60a5fa' : '#2563eb'
+    if (files[activeIndex] && origCanvas.current) drawWave(files[activeIndex], origCanvas.current, origColor)
+    if (masteredUrls[activeIndex] && mastCanvas.current) drawWave(masteredUrls[activeIndex], mastCanvas.current, mastColor)
+  }, [files, activeIndex, isDark, masteredUrls])
 
+  // ── 오디오 분석 ──────────────────────────────────────────────────────────────
+  const ensureRouting = (audio: HTMLAudioElement) => {
+    if (!audioCtxRef.current) audioCtxRef.current = new ((window as any).AudioContext || (window as any).webkitAudioContext)()
+    const ctx = audioCtxRef.current
+    if (!sourceNodes.current.has(audio)) {
+      try {
+        const src = ctx.createMediaElementSource(audio)
+        const an  = ctx.createAnalyser(); an.fftSize = 2048
+        src.connect(an); an.connect(ctx.destination)
+        sourceNodes.current.set(audio, { src, an })
+      } catch (e) { console.error(e) }
+    }
+    return sourceNodes.current.get(audio)?.an
+  }
+
+  const startAnalyzing = (audio: HTMLAudioElement, type: 'orig' | 'mast') => {
+    const an = ensureRouting(audio); if (!an) return
+    const tick = () => {
+      const data = new Float32Array(an.fftSize); an.getFloatTimeDomainData(data)
+      let peak = 0, sum = 0
+      for (let i = 0; i < data.length; i++) { const v = Math.abs(data[i]); if (v > peak) peak = v; sum += data[i] * data[i] }
+      const meter = type === 'orig' ? origMeter.current : mastMeter.current
+      meter.sum += sum; meter.samples += data.length; if (peak > meter.maxPeak) meter.maxPeak = peak
+      const tp   = meter.maxPeak > 0 ? 20 * Math.log10(meter.maxPeak) : -70
+      const lufs = Math.sqrt(meter.sum / meter.samples) > 0 ? 20 * Math.log10(Math.sqrt(meter.sum / meter.samples)) - 0.691 : -70
+      const r = (v: number) => Math.round(v * 10) / 10
+      if (type === 'orig') { setOrigLufs(r(lufs)); setOrigTp(r(tp)) }
+      else                 { setMastLufs(r(lufs)); setMastTp(r(tp)) }
+      rafIdRef.current = requestAnimationFrame(tick)
+    }
+    tick()
+  }
+
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>, ref: React.RefObject<HTMLAudioElement | null>, dur: number, type: 'orig' | 'mast') => {
+    if (!ref?.current || !dur) return
+    ref.current.currentTime = (e.nativeEvent.offsetX / e.currentTarget.getBoundingClientRect().width) * dur
+    if (type === 'orig') origMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
+    else                 mastMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
+  }
+
+  const togglePlay = async (type: 'orig' | 'mast') => {
+    const audio = type === 'orig' ? origAudioRef.current : mastAudioRef.current; if (!audio) return
+    if (audioCtxRef.current?.state === 'suspended') await audioCtxRef.current.resume()
+    if (type === 'orig') {
+      if (origPlaying) { audio.pause(); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current) }
+      else { mastAudioRef.current?.pause(); setMastPlaying(false); try { await audio.play(); startAnalyzing(audio, 'orig') } catch {} }
+      setOrigPlaying(p => !p)
+    } else {
+      if (mastPlaying) { audio.pause(); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current) }
+      else { origAudioRef.current?.pause(); setOrigPlaying(false); try { await audio.play(); startAnalyzing(audio, 'mast') } catch {} }
+      setMastPlaying(p => !p)
+    }
+  }
+
+  // ── 파일 업로드 ──────────────────────────────────────────────────────────────
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(e.target.files || [])
+    const limit    = isPro ? 15 : 1
+    const oversize = selected.filter(f => f.size > MAX_MB * 1024 * 1024)
+    if (oversize.length > 0) { toast(`파일이 너무 큽니다. 최대 ${MAX_MB}MB (${oversize[0].name})`, 'error'); return }
+    if (selected.length > limit) {
+      toast(isPro ? '최대 15곡까지 처리 가능합니다.' : '무료 버전은 1곡만 가능합니다. PRO로 업그레이드하세요.', 'warn')
+      setFiles(selected.slice(0, limit))
+    } else { setFiles(selected) }
+    setActiveIndex(0); setMasteredUrls({}); setOrigPlaying(false); setMastPlaying(false)
+  }
+
+  // ── 프리셋 ───────────────────────────────────────────────────────────────────
+  const applyPreset = (genre: string) => {
+    if (!isPro) { toast('PRESET 기능은 PRO 전용입니다. 🔒', 'warn'); return }
+    const P: Record<string, any> = {
+      Hiphop:     { targetLufs: '-9.0',  glueComp: '40', presence: '60', warmth: '70', treble: '30', stereoWidth: '110', spaceDepth: '10' },
+      Electronic: { targetLufs: '-8.0',  glueComp: '50', presence: '70', warmth: '20', treble: '60', stereoWidth: '130', spaceDepth: '20' },
+      RnB:        { targetLufs: '-12.0', glueComp: '30', presence: '40', warmth: '50', treble: '40', stereoWidth: '115', spaceDepth: '15' },
+      Film:       { targetLufs: '-14.0', glueComp: '20', presence: '30', warmth: '40', treble: '20', stereoWidth: '140', spaceDepth: '40' },
+      Ambient:    { targetLufs: '-16.0', glueComp: '10', presence: '20', warmth: '30', treble: '10', stereoWidth: '160', spaceDepth: '60' },
+    }
+    const p = P[genre]; if (!p) return
+    setTargetLufs(p.targetLufs); setGlueComp(p.glueComp); setPresence(p.presence)
+    setWarmth(p.warmth); setTreble(p.treble); setStereoWidth(p.stereoWidth); setSpaceDepth(p.spaceDepth)
+    toast(`${genre === 'RnB' ? 'R&B' : genre === 'Film' ? 'Film Music' : genre} 프리셋 적용됨`, 'success')
+  }
+
+  // ── ✅ [1순위] HuggingFace 콜드스타트 처리 ─────────────────────────────────
+  const wakeUpEngine = async (): Promise<void> => {
+    setEngineStatus('warming')
+    toast('AI 엔진 연결 중... 처음 시작 시 최대 30초 소요될 수 있어요.', 'info')
+    const healthUrl = ENGINE_URL.replace('/master', '/')
+    const deadline  = Date.now() + 35_000
+    while (Date.now() < deadline) {
+      try {
+        const res = await fetch(healthUrl, { signal: AbortSignal.timeout(8000) })
+        if (res.ok || res.status === 405 /* POST-only */) break
+      } catch { /* 아직 준비 중 */ }
+      await new Promise(r => setTimeout(r, 3000))
+    }
+    setEngineStatus('running')
+  }
+
+  // ── 마스터링 실행 ─────────────────────────────────────────────────────────────
   const runBatchMastering = async () => {
-    if (files.length === 0) return; setIsProcessing(true)
+    if (files.length === 0) return
+    setIsProcessing(true)
+    setProgress({ cur: 0, total: files.length })
+
+    // 콜드스타트: 먼저 상태 확인
+    try {
+      const res = await fetch(ENGINE_URL.replace('/master', '/'), { signal: AbortSignal.timeout(4000) })
+      if (!res.ok && res.status !== 405) throw new Error('cold')
+      setEngineStatus('running')
+    } catch {
+      await wakeUpEngine()
+    }
+
     for (let i = 0; i < files.length; i++) {
       setActiveIndex(i)
-      const formData = new FormData()
-      formData.append("file", files[i]); formData.append("out_format", outFormat); formData.append("out_sample_rate", outSampleRate); formData.append("out_bit_depth", outBitDepth)
-      formData.append("target_lufs", targetLufs); formData.append("true_peak", truePeak); formData.append("output_trim", outputTrim)
-      formData.append("presence", presence); formData.append("warmth", warmth); formData.append("treble", treble)
-      formData.append("stereo_width", stereoWidth); formData.append("space_depth", spaceDepth); formData.append("mono_bass", monoBass); formData.append("glue_comp", glueComp)
+      setProgress({ cur: i + 1, total: files.length })
+      const fd = new FormData()
+      fd.append('file', files[i])
+      fd.append('out_format', outFormat); fd.append('out_sample_rate', outSR); fd.append('out_bit_depth', outBit)
+      fd.append('target_lufs', targetLufs); fd.append('true_peak', truePeak); fd.append('output_trim', outputTrim)
+      fd.append('presence', presence); fd.append('warmth', warmth); fd.append('treble', treble)
+      fd.append('stereo_width', stereoWidth); fd.append('space_depth', spaceDepth)
+      fd.append('mono_bass', monoBass); fd.append('glue_comp', glueComp)
       try {
-        const resp = await fetch(ENGINE_URL, { method: "POST", body: formData })
-        if (!resp.ok) throw new Error("엔진 오류"); const blob = await resp.blob()
-        setMasteredUrls(p => ({ ...p, [i]: URL.createObjectURL(blob) })); mastMeterData.current = { sum: 0, samples: 0, maxPeak: 0 } 
-      } catch (e) { alert(`[${files[i].name}] 오류`) }
+        const res = await fetch(ENGINE_URL, { method: 'POST', body: fd })
+        if (!res.ok) throw new Error('engine error')
+        const blob = await res.blob()
+        setMasteredUrls(p => ({ ...p, [i]: URL.createObjectURL(blob) }))
+        mastMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
+        toast(`✓ ${files[i].name}`, 'success')
+      } catch {
+        toast(`처리 실패: ${files[i].name}`, 'error')
+      }
     }
+
     setIsProcessing(false)
+    setEngineStatus('idle')
+    setProgress({ cur: 0, total: 0 })
+    if (files.length > 1) toast(`전체 ${files.length}곡 마스터링 완료!`, 'success')
   }
 
-  const downloadAllAsZip = async () => {
-    const zip = new JSZip(); const masteredKeys = Object.keys(masteredUrls); if (masteredKeys.length === 0) return
-    for (const key of masteredKeys) {
-      const index = Number(key); const url = masteredUrls[index]; const file = files[index]
-      const nameWithoutExt = file.name.split('.').slice(0, -1).join('.')
-      const fileName = `${nameWithoutExt}_Mastered.${outFormat.toLowerCase()}`
-      try { const response = await fetch(url); const blob = await response.blob(); zip.file(fileName, blob) } catch (e) { console.error(e) }
+  // ── ZIP 다운로드 ──────────────────────────────────────────────────────────────
+  const downloadZip = async () => {
+    const keys = Object.keys(masteredUrls); if (keys.length === 0) return
+    toast('ZIP 압축 중...', 'info')
+    const zip = new JSZip()
+    for (const key of keys) {
+      const i    = Number(key)
+      const name = files[i].name.split('.').slice(0, -1).join('.') + `_Mastered.${outFormat.toLowerCase()}`
+      try { const blob = await (await fetch(masteredUrls[i])).blob(); zip.file(name, blob) } catch {}
     }
     const content = await zip.generateAsync({ type: 'blob' })
-    const link = document.createElement('a'); link.href = URL.createObjectURL(content); link.download = 'Mastered_Tracks.zip'; link.click()
+    const a = document.createElement('a'); a.href = URL.createObjectURL(content); a.download = 'Mastered_Tracks.zip'; a.click()
+    toast('ZIP 다운로드 시작!', 'success')
   }
 
+  const getDownloadName = () => {
+    if (!files[activeIndex]) return 'Mastered.mp3'
+    return files[activeIndex].name.split('.').slice(0, -1).join('.') + `_Mastered.${outFormat.toLowerCase()}`
+  }
+
+  const fmt = (t: number) => {
+    if (isNaN(t) || !isFinite(t)) return '00:00'
+    return `${Math.floor(t / 60).toString().padStart(2, '0')}:${Math.floor(t % 60).toString().padStart(2, '0')}`
+  }
+
+  const btnLabel = () => {
+    if (engineStatus === 'warming') return '⚡ ENGINE WARMING UP...'
+    if (isProcessing && progress.total > 1) return `PROCESSING ${progress.cur} / ${progress.total}`
+    if (isProcessing) return 'PROCESSING...'
+    return files.length > 1 ? `MASTER ALL ${files.length} TRACKS` : 'START MASTERING'
+  }
+
+  // ── JSX ───────────────────────────────────────────────────────────────────────
   return (
-    <main className={isLightMode ? 'light-mode' : 'dark-mode'}>
-      <div className="workspace">
-        <header className="main-header">
-          <div className="brand">THISISMIDI <span className="accent">.</span></div>
-          <div className="user-area">
-            {user && <span className="tier-label">{tier}</span>}
-            <button onClick={() => setIsLightMode(!isLightMode)} className="btn-icon">{isLightMode ? 'DARK' : 'LIGHT'}</button>
-            {user ? <button onClick={() => supabase.auth.signOut()} className="btn-text">LOGOUT</button> : <button onClick={() => supabase.auth.signInWithOAuth({provider:'google'})} className="btn-text">LOGIN</button>}
+    <main className={isDark ? 'dark' : 'light'}>
+
+      {/* ✅ [2순위] Toast 알림 시스템 */}
+      <div className="toast-wrap">
+        {toasts.map(t => (
+          <div key={t.id} className={`toast toast-${t.type}`}>{t.msg}</div>
+        ))}
+      </div>
+
+      <div className="ws">
+        {/* Header */}
+        <header className="hd">
+          <div className="brand">THISISMIDI <span className="acc">.</span></div>
+          <div className="hd-right">
+            {user && <span className="tier-chip">{tier}</span>}
+            {engineStatus === 'warming' && <span className="eng-chip warm">⚡ WARMING</span>}
+            {engineStatus === 'running' && <span className="eng-chip run">● LIVE</span>}
+            <button className="btn-sm" onClick={() => setIsDark(d => !d)}>{isDark ? '☀ LIGHT' : '☾ DARK'}</button>
+            {user
+              ? <button className="btn-sm" onClick={() => supabase.auth.signOut()}>LOGOUT</button>
+              : <button className="btn-sm" onClick={() => supabase.auth.signInWithOAuth({ provider: 'google' })}>LOGIN</button>
+            }
           </div>
         </header>
 
+        {/* Login Hero */}
         {!user ? (
-          <div className="auth-hero"><h1>Mastering, <br/>Simplified.</h1><button onClick={()=>supabase.auth.signInWithOAuth({provider:'google'})} className="btn-prime">Start with Google</button></div>
+          <div className="hero">
+            <p className="hero-eyebrow">Professional AI Audio Mastering</p>
+            <h1 className="hero-title">Mastering,<br />Simplified.</h1>
+            <button className="btn-prime" onClick={() => supabase.auth.signInWithOAuth({ provider: 'google' })}>
+              Start with Google →
+            </button>
+          </div>
         ) : (
-          <div className="vertical-layout">
-            
-            <section className="panel queue-panel">
-              <div className="panel-top"><h3>Track Queue</h3><span>{files.length} tracks {isPro ? '(Max 15)' : '(Max 1)'}</span></div>
-              <div className="upload-container">
-                <input type="file" id="u-file" hidden multiple onChange={handleFileUpload} accept="audio/*" />
-                <label htmlFor="u-file" className="drop-area">Drop audio files here</label>
-                <div className="action-row">
-                  <label htmlFor="u-file" className="btn-sub">UPLOAD</label>
-                  <button onClick={runBatchMastering} className="btn-prime" disabled={isProcessing || files.length === 0}>
-                    {isProcessing ? 'PROCESSING...' : (files.length > 1 ? `MASTER ALL ${files.length} TRACKS` : 'START MASTERING')}
-                  </button>
-                </div>
-                {Object.keys(masteredUrls).length > 1 && <button onClick={downloadAllAsZip} className="btn-prime zip-btn">📥 DOWNLOAD ALL AS ZIP</button>}
+          <div className="layout">
+
+            {/* ── Track Queue ─────────────────────────────── */}
+            <section className="panel">
+              <div className="panel-top">
+                <h3>Track Queue</h3>
+                <span>{files.length} / {isPro ? 15 : 1} tracks</span>
               </div>
+              <input type="file" id="u-file" hidden multiple onChange={handleFileUpload} accept="audio/*" />
+              <label htmlFor="u-file" className="drop-zone">
+                <span className="drop-icon">🎵</span>
+                <span className="drop-main">Drop audio files here or click to browse</span>
+                <span className="drop-sub">MP3 · WAV · FLAC · AIFF &nbsp;|&nbsp; Max {MAX_MB}MB per file</span>
+              </label>
+
+              <div className="action-row">
+                <label htmlFor="u-file" className="btn-sec">UPLOAD</label>
+                <button className="btn-prime" onClick={runBatchMastering} disabled={isProcessing || files.length === 0}>
+                  {btnLabel()}
+                </button>
+              </div>
+
+              {/* ✅ [1순위] 콜드스타트 안내 */}
+              {engineStatus === 'warming' && (
+                <div className="cold-notice">
+                  <span className="spin" />
+                  AI 엔진을 깨우는 중입니다. 처음 실행 시 최대 30초 소요될 수 있어요.
+                </div>
+              )}
+
+              {/* ✅ [2순위] 진행률 바 */}
+              {isProcessing && progress.total > 0 && (
+                <div className="prog-track">
+                  <div className="prog-bar" style={{ width: `${progressPct}%` }} />
+                  <span className="prog-label">{Math.round(progressPct)}%</span>
+                </div>
+              )}
+
+              {Object.keys(masteredUrls).length > 1 && (
+                <button className="btn-zip" onClick={downloadZip}>📥 DOWNLOAD ALL AS ZIP</button>
+              )}
+
               <ul className="track-list">
                 {files.map((f, i) => (
-                  <li key={i} className={activeIndex === i ? 'active' : ''} onClick={() => { setActiveIndex(i); setOrigIsPlaying(false); setMastIsPlaying(false); }}>
-                    <input type="checkbox" checked={activeIndex === i} readOnly />
-                    <span className="name">{i+1}. {f.name}</span>
-                    {masteredUrls[i] && <span style={{fontSize:'0.7rem', color:'var(--acc)', marginLeft:'auto', fontWeight:'bold'}}>✓ DONE</span>}
+                  <li key={i}
+                    className={`track-item${activeIndex === i ? ' active' : ''}`}
+                    onClick={() => { setActiveIndex(i); setOrigPlaying(false); setMastPlaying(false) }}>
+                    <span className="t-num">{String(i + 1).padStart(2, '0')}</span>
+                    <span className="t-name">{f.name}</span>
+                    {isProcessing && progress.cur === i + 1 && engineStatus === 'running' && <span className="t-badge proc">◎</span>}
+                    {masteredUrls[i] && <span className="t-badge done">✓</span>}
                   </li>
                 ))}
               </ul>
             </section>
 
-            <section className="panel monitor-panel">
-              <div className="panel-top"><h3>A/B Monitor</h3><span className="selected-info">Selected: {files[activeIndex]?.name || 'None'}</span></div>
-              <div className="monitor-row">
-                <div className="m-controls">
-                  <p className="m-label" style={{color: 'var(--acc)'}}>Original</p>
-                  <div className="stats">Integrated: {origLufs}<br/>TP: {origTp}</div>
-                  <button onClick={()=>togglePlay('orig')} className="btn-p">{origIsPlaying ? 'STOP' : 'PLAY'}</button>
+            {/* ── A/B Monitor ─────────────────────────────── */}
+            <section className="panel">
+              <div className="panel-top">
+                <h3>A / B Monitor</h3>
+                <span>{files[activeIndex]?.name || '—'}</span>
+              </div>
+
+              {/* Original */}
+              <div className="mon-row">
+                <div className="mon-ctrl">
+                  <p className="mon-label orig-lbl">Original</p>
+                  <div className="meter-box">
+                    <div className="meter-row"><span>LUFS</span><span className="mval">{origLufs}</span></div>
+                    <div className="meter-row"><span>TP</span><span className="mval">{origTp}</span></div>
+                  </div>
+                  <button className="btn-play" onClick={() => togglePlay('orig')}>
+                    {origPlaying ? '■ STOP' : '▶ PLAY'}
+                  </button>
                 </div>
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                  <div className="time-display">{formatTime(origTime)} / {formatTime(origDuration)}</div>
-                  <div className="wave-box" onClick={(e) => handleSeek(e, origAudioRef, origDuration, 'orig')}>
+                <div className="mon-wave">
+                  <div className="time-row">{fmt(origTime)} / {fmt(origDur)}</div>
+                  <div className="wave-box" onClick={e => handleSeek(e, origAudioRef, origDur, 'orig')}>
                     <canvas ref={origCanvas} width={1000} height={140} />
-                    <div className="seeker" style={{left: origDuration > 0 ? `${(origTime/origDuration)*100}%` : '0'}} />
+                    <div className="seeker sk-orig" style={{ left: origDur > 0 ? `${(origTime / origDur) * 100}%` : '0' }} />
                   </div>
                 </div>
-                <audio ref={origAudioRef} src={currentOrigUrl} onTimeUpdate={(e)=>setOrigTime(e.currentTarget.currentTime)} onLoadedMetadata={(e)=>setOrigDuration(e.currentTarget.duration)} onEnded={() => setOrigIsPlaying(false)} />
+                <audio ref={origAudioRef} src={currentOrigUrl}
+                  onTimeUpdate={e => setOrigTime(e.currentTarget.currentTime)}
+                  onLoadedMetadata={e => setOrigDur(e.currentTarget.duration)}
+                  onEnded={() => setOrigPlaying(false)} />
               </div>
-              <div className="monitor-row mt-20">
-                <div className="m-controls">
-                  <p className="m-label color-m">Mastered</p>
-                  <div className="stats">Integrated: {mastLufs}<br/>TP: {mastTp}</div>
-                  <div style={{display:'flex', flexDirection:'column', gap:'5px'}}>
-                    <button onClick={()=>togglePlay('mast')} className="btn-p" disabled={!masteredUrls[activeIndex]}>{mastIsPlaying ? 'STOP' : 'PLAY'}</button>
-                    {masteredUrls[activeIndex] && <a href={masteredUrls[activeIndex]} download={getDownloadName()} className="btn-p download" style={{textAlign:'center'}}>DOWNLOAD</a>}
+
+              {/* Mastered */}
+              <div className="mon-row" style={{ marginTop: 20 }}>
+                <div className="mon-ctrl">
+                  <p className="mon-label mast-lbl">Mastered</p>
+                  <div className="meter-box">
+                    <div className="meter-row"><span>LUFS</span><span className="mval pro">{mastLufs}</span></div>
+                    <div className="meter-row"><span>TP</span><span className="mval pro">{mastTp}</span></div>
                   </div>
+                  <button className="btn-play" onClick={() => togglePlay('mast')} disabled={!masteredUrls[activeIndex]}>
+                    {mastPlaying ? '■ STOP' : '▶ PLAY'}
+                  </button>
+                  {masteredUrls[activeIndex] && (
+                    <a className="btn-dl" href={masteredUrls[activeIndex]} download={getDownloadName()}>↓ DOWNLOAD</a>
+                  )}
                 </div>
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                  <div className="time-display">{formatTime(mastTime)} / {formatTime(mastDuration)}</div>
-                  <div className="wave-box" onClick={(e) => handleSeek(e, mastAudioRef, mastDuration, 'mast')}>
+                <div className="mon-wave">
+                  <div className="time-row">{fmt(mastTime)} / {fmt(mastDur)}</div>
+                  <div className="wave-box" onClick={e => handleSeek(e, mastAudioRef, mastDur, 'mast')}>
                     <canvas ref={mastCanvas} width={1000} height={140} />
-                    <div className="seeker" style={{left: mastDuration > 0 ? `${(mastTime/mastDuration)*100}%` : '0'}} />
-                    {!masteredUrls[activeIndex] && <div className="no-file-overlay">No mastered file yet</div>}
+                    <div className="seeker sk-mast" style={{ left: mastDur > 0 ? `${(mastTime / mastDur) * 100}%` : '0' }} />
+                    {!masteredUrls[activeIndex] && <div className="no-file">No mastered file yet</div>}
                   </div>
                 </div>
-                <audio ref={mastAudioRef} src={masteredUrls[activeIndex] || ''} onTimeUpdate={(e)=>setMastTime(e.currentTarget.currentTime)} onLoadedMetadata={(e)=>setMastDuration(e.currentTarget.duration)} onEnded={() => setMastIsPlaying(false)} />
+                <audio ref={mastAudioRef} src={masteredUrls[activeIndex] || ''}
+                  onTimeUpdate={e => setMastTime(e.currentTarget.currentTime)}
+                  onLoadedMetadata={e => setMastDur(e.currentTarget.duration)}
+                  onEnded={() => setMastPlaying(false)} />
               </div>
             </section>
 
-            {/* 🚨 [프리셋 패널 추가] */}
-            <section className="panel preset-panel">
-               <div className="panel-top"><h3>Mastering Presets {!isPro && '(Pro Features Locked 🔒)'}</h3></div>
-               <div className="preset-grid">
-                  {['Hiphop', 'Electronic', 'RnB', 'Film', 'Ambient'].map(genre => (
-                    <button key={genre} onClick={() => applyPreset(genre)} className="btn-preset" disabled={!isPro}>
-                      {genre === 'RnB' ? 'R&B' : genre === 'Film' ? 'Film Music' : genre}
-                    </button>
-                  ))}
-               </div>
+            {/* ── Presets ─────────────────────────────────── */}
+            <section className="panel">
+              <div className="panel-top">
+                <h3>Mastering Presets</h3>
+                {!isPro && <span className="lock">PRO ONLY 🔒</span>}
+              </div>
+              <div className="preset-grid">
+                {[
+                  { key: 'Hiphop',     icon: '🎤', label: 'Hiphop'     },
+                  { key: 'Electronic', icon: '⚡', label: 'Electronic' },
+                  { key: 'RnB',        icon: '🎸', label: 'R&B'        },
+                  { key: 'Film',       icon: '🎬', label: 'Film Music'  },
+                  { key: 'Ambient',    icon: '🌊', label: 'Ambient'     },
+                ].map(({ key, icon, label }) => (
+                  <button key={key} className="btn-preset" onClick={() => applyPreset(key)} disabled={!isPro}>
+                    <span className="p-icon">{icon}</span>
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
             </section>
 
-            <section className="panel controls-panel">
-              <div className="panel-top"><h3>Mastering Controls {!isPro && '(Pro Features Locked 🔒)'}</h3></div>
-              <div className="control-groups-wrapper">
-                <div className="control-group">
+            {/* ── Mastering Controls ───────────────────────── */}
+            <section className="panel">
+              <div className="panel-top">
+                <h3>Mastering Controls</h3>
+                {!isPro && <span className="lock">PRO ONLY 🔒</span>}
+              </div>
+              <div className="ctrl-grid">
+
+                <div className="ctrl-group">
                   <p className="g-title">Output Format</p>
-                  <div className="sel-box"><label>Format</label><select className="styled-select" value={outFormat} onChange={(e) => setOutFormat(e.target.value)} disabled={!isPro}><option value="MP3">MP3</option>{isPro && <><option value="WAV">WAV</option><option value="FLAC">FLAC</option></>}</select></div>
-                  <div className="sel-box"><label>Sample Rate</label><select className="styled-select" value={outSampleRate} onChange={(e) => setOutSampleRate(e.target.value)} disabled={!isPro}><option value="44100">44.1 kHz</option>{isPro && <><option value="48000">48 kHz</option><option value="96000">96 kHz</option></>}</select></div>
-                  <div className="sel-box"><label>Bit Depth</label><select className="styled-select" value={outBitDepth} onChange={(e) => setOutBitDepth(e.target.value)} disabled={!isPro}><option value="16">16-bit</option>{isPro && <><option value="24">24-bit</option><option value="32">32-bit float</option></>}</select></div>
+                  <div className="sel-row"><label>Format</label>
+                    <select className="sel" value={outFormat} onChange={e => setOutFormat(e.target.value)} disabled={!isPro}>
+                      <option value="MP3">MP3</option>
+                      {isPro && <><option value="WAV">WAV</option><option value="FLAC">FLAC</option></>}
+                    </select>
+                  </div>
+                  <div className="sel-row"><label>Sample Rate</label>
+                    <select className="sel" value={outSR} onChange={e => setOutSR(e.target.value)} disabled={!isPro}>
+                      <option value="44100">44.1 kHz</option>
+                      {isPro && <><option value="48000">48 kHz</option><option value="96000">96 kHz</option></>}
+                    </select>
+                  </div>
+                  <div className="sel-row"><label>Bit Depth</label>
+                    <select className="sel" value={outBit} onChange={e => setOutBit(e.target.value)} disabled={!isPro}>
+                      <option value="16">16-bit</option>
+                      {isPro && <><option value="24">24-bit</option><option value="32">32-bit float</option></>}
+                    </select>
+                  </div>
                 </div>
 
-                <div className="control-group">
-                  <p className="g-title">Loudness and Safety</p>
-                  <div className="sld-row"><label>Target LUFS</label><input type="range" min="-24" max="-6" step="0.5" value={targetLufs} onChange={(e)=>setTargetLufs(e.target.value)} /><span>{targetLufs}</span></div>
-                  <div className="sld-row"><label>True Peak Ceiling</label><input type="range" min="-3" max="0" step="0.1" value={truePeak} onChange={(e)=>setTruePeak(e.target.value)} /><span>{truePeak} dBTP</span></div>
-                  <div className="sld-row"><label>Output Trim</label><input type="range" min="-6" max="6" step="0.1" value={outputTrim} onChange={(e)=>setOutputTrim(e.target.value)} disabled={!isPro} /><span>{outputTrim} dB</span></div>
-                  <div className="sld-row" style={{marginTop: '15px', borderTop: '1px dashed var(--brd)', paddingTop: '10px'}}><label style={{color: 'var(--acc)'}}>Presence</label><input type="range" min="0" max="100" value={presence} onChange={(e)=>setPresence(e.target.value)} disabled={!isPro} /><span>{presence}%</span></div>
+                <div className="ctrl-group">
+                  <p className="g-title">Loudness &amp; Safety</p>
+                  <SliderRow label="Target LUFS"  min={-24} max={-6}  step={0.5} value={targetLufs}  onChange={setTargetLufs}  unit=""      />
+                  <SliderRow label="True Peak"    min={-3}  max={0}   step={0.1} value={truePeak}    onChange={setTruePeak}    unit=" dBTP" />
+                  <SliderRow label="Output Trim"  min={-6}  max={6}   step={0.1} value={outputTrim}  onChange={setOutputTrim}  unit=" dB"   disabled={!isPro} />
+                  <SliderRow label="Presence"     min={0}   max={100} step={1}   value={presence}    onChange={setPresence}    unit="%"     disabled={!isPro} accent />
                 </div>
-                
-                <div className="control-group">
+
+                <div className="ctrl-group">
                   <p className="g-title">Tone Character</p>
-                  <div className="sld-row"><label>Warmth</label><input type="range" min="0" max="100" value={warmth} onChange={(e)=>setWarmth(e.target.value)} disabled={!isPro} /><span>{warmth}%</span></div>
-                  <div className="sld-row"><label>Treble</label><input type="range" min="0" max="100" value={treble} onChange={(e)=>setTreble(e.target.value)} disabled={!isPro} /><span>{treble}%</span></div>
+                  <SliderRow label="Warmth"       min={0} max={100} step={1} value={warmth}      onChange={setWarmth}      unit="%" disabled={!isPro} />
+                  <SliderRow label="Treble (Air)" min={0} max={100} step={1} value={treble}      onChange={setTreble}      unit="%" disabled={!isPro} />
                 </div>
-                
-                <div className="control-group">
-                  <p className="g-title">Stereo, Space & Dynamics</p>
-                  <div className="sld-row"><label>Stereo Width</label><input type="range" min="0" max="200" value={stereoWidth} onChange={(e)=>setStereoWidth(e.target.value)} disabled={!isPro} /><span>{stereoWidth}%</span></div>
-                  <div className="sld-row"><label>Space Depth</label><input type="range" min="0" max="100" value={spaceDepth} onChange={(e)=>setSpaceDepth(e.target.value)} disabled={!isPro} /><span>{spaceDepth}%</span></div>
-                  <div className="sld-row"><label>Mono Bass Anchor</label><input type="range" min="0" max="100" value={monoBass} onChange={(e)=>setMonoBass(e.target.value)} disabled={!isPro} /><span>{monoBass}%</span></div>
-                  <div className="sld-row" style={{marginTop: '25px', paddingTop: '15px', borderTop: '1px dashed var(--brd)'}}><label style={{color:'var(--acc)'}}>Vari-Mu Glue</label><input type="range" min="0" max="100" value={glueComp} onChange={(e)=>setGlueComp(e.target.value)} disabled={!isPro} /><span>{glueComp}%</span></div>
+
+                <div className="ctrl-group">
+                  <p className="g-title">Stereo, Space &amp; Dynamics</p>
+                  <SliderRow label="Stereo Width" min={0}   max={200} step={1} value={stereoWidth} onChange={setStereoWidth} unit="%" disabled={!isPro} />
+                  <SliderRow label="Space Depth"  min={0}   max={100} step={1} value={spaceDepth}  onChange={setSpaceDepth}  unit="%" disabled={!isPro} />
+                  <SliderRow label="Mono Bass"    min={0}   max={100} step={1} value={monoBass}    onChange={setMonoBass}    unit="%" disabled={!isPro} />
+                  <SliderRow label="Vari-Mu Glue" min={0}   max={100} step={1} value={glueComp}    onChange={setGlueComp}    unit="%" disabled={!isPro} accent />
                 </div>
+
               </div>
             </section>
+
           </div>
         )}
       </div>
 
+      {/* ══════════════════════════════════════════════════
+          ✅ [2순위] 완전 리뉴얼된 CSS
+          Dark 모드: 진한 배경 + 밝은 글씨
+          Light 모드: 흰 배경 + 검정 글씨 (전부 잘 보임)
+      ══════════════════════════════════════════════════ */}
       <style dangerouslySetInnerHTML={{ __html: `
-        :root { --bg: #0d0d0d; --p: #161616; --brd: #262626; --txt: #e5e5e5; --acc: #4ade80; --sec: #888; }
-        .light-mode { --bg: #f5f5f7; --p: #ffffff; --brd: #e5e5e7; --txt: #1d1d1f; --acc: #10b981; --sec: #86868b; }
-        body { margin: 0; background: var(--bg); color: var(--txt); font-family: -apple-system, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
-        .workspace { max-width: 1200px; margin: 0 auto; padding: 20px; }
-        .main-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
-        .brand { font-size: 1.4rem; font-weight: 900; letter-spacing: -1px; }
-        .accent { color: var(--acc); }
-        .user-area { display: flex; align-items: center; gap: 15px; }
-        .tier-label { font-size: 0.7rem; font-weight: 800; background: var(--brd); padding: 5px 12px; border-radius: 50px; color: var(--sec); }
-        .btn-icon, .btn-text { background: none; border: 1px solid var(--brd); color: var(--txt); padding: 7px 14px; border-radius: 8px; cursor: pointer; font-size: 0.75rem; font-weight: 700; }
-        .btn-icon:hover, .btn-text:hover { background: var(--brd); }
-        .vertical-layout { display: flex; flex-direction: column; gap: 30px; width: 100%; }
-        .panel { background: var(--p); border: 1px solid var(--brd); border-radius: 12px; padding: 25px; box-shadow: 0 4px 30px rgba(0,0,0,0.1); }
-        .panel-top { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--brd); padding-bottom: 15px; margin-bottom: 20px; }
-        .panel-top h3 { font-size: 1rem; margin: 0; font-weight: 800; }
-        .upload-container { background: rgba(0,0,0,0.05); border: 1px solid var(--brd); border-radius: 8px; padding: 20px; margin-bottom: 15px; }
-        .drop-area { display: flex; height: 80px; border: 1px dashed var(--sec); border-radius: 6px; align-items: center; justify-content: center; font-size: 0.85rem; color: var(--sec); cursor: pointer; }
-        .action-row { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; margin-top: 15px; }
-        .btn-prime { background: var(--acc); color: #000; border: none; padding: 12px; border-radius: 6px; font-weight: 800; cursor: pointer; }
-        .zip-btn { margin-top: 10px; width: 100%; background: #3b82f6; color: #fff; }
-        .btn-sub { background: var(--txt); color: var(--bg); border: none; padding: 12px; border-radius: 6px; font-weight: 800; cursor: pointer; text-align: center; }
-        .track-list { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
-        .track-list li { padding: 12px 15px; border-radius: 6px; display: flex; align-items: center; gap: 12px; cursor: pointer; font-size: 0.85rem; border: 1px solid var(--brd); background: rgba(0,0,0,0.02); }
-        .track-list li.active { background: rgba(74,222,128,0.1); border-color: var(--acc); }
-        .monitor-row { display: flex; gap: 20px; align-items: center; }
-        .m-controls { width: 120px; flex-shrink: 0; }
-        .m-label { font-size: 0.85rem; font-weight: 800; margin-bottom: 8px; }
-        .stats { font-size: 0.7rem; color: var(--sec); font-family: monospace; margin-bottom: 12px; }
-        .btn-p { width: 100%; padding: 8px; border: none; background: var(--txt); color: var(--bg); border-radius: 6px; font-size: 0.75rem; font-weight: 800; cursor: pointer; }
-        .btn-p.download { background: #3b82f6; color: #fff; text-decoration: none; }
-        .time-display { text-align: right; font-size: 0.7rem; color: var(--sec); margin-bottom: 6px; font-weight: bold; }
-        .wave-box { width: 100%; height: 160px; background: rgba(0,0,0,0.05); border: 1px solid var(--brd); border-radius: 8px; position: relative; overflow: hidden; cursor: pointer; }
-        canvas { width: 100%; height: 100%; }
-        .seeker { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 10px rgba(255,255,255,0.8); }
-        .no-file-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.05); display: flex; align-items: center; justify-content: center; font-size: 0.85rem; color: var(--sec); }
-        .control-groups-wrapper { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 30px; }
-        .control-group { background: rgba(0,0,0,0.02); padding: 20px; border-radius: 8px; border: 1px solid var(--brd); }
-        .g-title { font-size: 0.85rem; font-weight: 800; margin-bottom: 20px; border-bottom: 1px solid var(--brd); padding-bottom: 10px; }
-        .sel-box { margin-bottom: 15px; }
-        .sel-box label { font-size: 0.75rem; color: var(--sec); display: block; margin-bottom: 5px; }
-        .styled-select { background: var(--bg); color: var(--txt); border: 1px solid var(--brd); padding: 8px 12px; border-radius: 6px; width: 100%; }
-        .sld-row { display: flex; align-items: center; gap: 15px; margin-bottom: 15px; }
-        .sld-row label { font-size: 0.8rem; width: 120px; color: var(--sec); }
-        .sld-row input { flex: 1; accent-color: var(--acc); cursor: pointer; }
-        .sld-row span { width: 65px; font-size: 0.75rem; text-align: right; color: var(--acc); font-family: monospace; }
-        .auth-hero { text-align: center; padding: 150px 0; }
-        .auth-hero h1 { font-size: 4rem; letter-spacing: -3px; line-height: 0.9; margin-bottom: 40px; }
+        /* ── Variables ─────────────────────────────── */
+        .dark {
+          --bg:      #080808;
+          --sur:     #111111;
+          --sur2:    #171717;
+          --brd:     #242424;
+          --txt:     #ebebeb;
+          --txt2:    #777777;
+          --acc:     #4ade80;
+          --acc2:    #60a5fa;
+          --acc-bg:  rgba(74,222,128,0.08);
+          --danger:  #f87171;
+          --warn:    #fbbf24;
+        }
+        .light {
+          --bg:      #f0f0f0;
+          --sur:     #ffffff;
+          --sur2:    #f7f7f8;
+          --brd:     #e0e0e3;
+          --txt:     #0a0a0a;
+          --txt2:    #555555;
+          --acc:     #16a34a;
+          --acc2:    #2563eb;
+          --acc-bg:  rgba(22,163,74,0.07);
+          --danger:  #dc2626;
+          --warn:    #b45309;
+        }
 
-        /* 🚨 [프리셋 스타일] 추가 */
-        .preset-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
-        .btn-preset { background: var(--bg); color: var(--txt); border: 1px solid var(--brd); padding: 15px; border-radius: 8px; font-weight: 800; font-size: 0.8rem; cursor: pointer; transition: 0.2s; }
-        .btn-preset:hover:not(:disabled) { border-color: var(--acc); background: rgba(74,222,128,0.05); }
-        .btn-preset:disabled { opacity: 0.3; cursor: not-allowed; }
+        /* ── Base ──────────────────────────────────── */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: var(--bg); color: var(--txt); font-family: 'SF Mono','Fira Code','Cascadia Code',ui-monospace,monospace; font-size: 14px; -webkit-font-smoothing: antialiased; transition: background .25s, color .25s; }
+        button, select, label { font-family: inherit; }
+
+        /* ── Toast ─────────────────────────────────── */
+        .toast-wrap { position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+        .toast { padding: 11px 16px; border-radius: 8px; font-size: 0.78rem; font-weight: 600; border: 1px solid; max-width: 300px; animation: toastIn .25s ease; pointer-events: auto; }
+        .toast-success { background: rgba(74,222,128,.12); border-color: #4ade80; color: var(--txt); }
+        .toast-error   { background: rgba(248,113,113,.12); border-color: #f87171; color: var(--txt); }
+        .toast-warn    { background: rgba(251,191,36,.12);  border-color: #fbbf24; color: var(--txt); }
+        .toast-info    { background: rgba(96,165,250,.12);  border-color: #60a5fa; color: var(--txt); }
+        /* Light 모드 토스트: 글씨 확실히 검정으로 */
+        .light .toast { color: #0a0a0a; }
+        @keyframes toastIn { from { opacity:0; transform:translateX(16px); } to { opacity:1; transform:translateX(0); } }
+
+        /* ── Layout ────────────────────────────────── */
+        .ws     { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .layout { display: flex; flex-direction: column; gap: 20px; }
+
+        /* ── Header ────────────────────────────────── */
+        .hd       { display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; }
+        .brand    { font-size: 1.15rem; font-weight: 900; letter-spacing: -.5px; color: var(--txt); }
+        .acc      { color: var(--acc); }
+        .hd-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .tier-chip { font-size: .65rem; font-weight: 800; letter-spacing: 1px; padding: 3px 10px; border-radius: 50px; background: var(--sur2); border: 1px solid var(--brd); color: var(--txt2); }
+        .eng-chip  { font-size: .65rem; font-weight: 800; letter-spacing: .5px; padding: 3px 10px; border-radius: 50px; border: 1px solid; }
+        .eng-chip.warm { background: rgba(251,191,36,.1); border-color: #fbbf24; color: #fbbf24; }
+        .eng-chip.run  { background: rgba(74,222,128,.1); border-color: var(--acc); color: var(--acc); }
+        .btn-sm   { background: var(--sur); border: 1px solid var(--brd); color: var(--txt); padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: .72rem; font-weight: 700; letter-spacing: .5px; transition: .15s; }
+        .btn-sm:hover { background: var(--sur2); border-color: var(--txt2); }
+
+        /* ── Panel ─────────────────────────────────── */
+        .panel     { background: var(--sur); border: 1px solid var(--brd); border-radius: 12px; padding: 22px; }
+        .panel-top { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--brd); padding-bottom: 14px; margin-bottom: 18px; }
+        .panel-top h3 { font-size: .78rem; font-weight: 800; letter-spacing: 1.2px; text-transform: uppercase; color: var(--txt); }
+        .panel-top span { font-size: .72rem; color: var(--txt2); }
+        .lock { font-size: .65rem; background: var(--sur2); border: 1px solid var(--brd); padding: 2px 8px; border-radius: 50px; color: var(--txt2); }
+
+        /* ── Upload ────────────────────────────────── */
+        .drop-zone  { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 88px; border: 1px dashed var(--brd); border-radius: 8px; cursor: pointer; transition: .2s; background: var(--sur2); padding: 20px; }
+        .drop-zone:hover { border-color: var(--acc); background: var(--acc-bg); }
+        .drop-icon  { font-size: 1.4rem; }
+        .drop-main  { font-size: .83rem; font-weight: 600; color: var(--txt); }
+        .drop-sub   { font-size: .7rem; color: var(--txt2); }
+        .action-row { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; margin-top: 12px; }
+        .btn-prime  { background: var(--acc); color: #000; border: none; padding: 11px; border-radius: 6px; font-weight: 800; font-size: .78rem; letter-spacing: .5px; cursor: pointer; transition: .15s; }
+        .btn-prime:hover:not(:disabled) { filter: brightness(1.12); }
+        .btn-prime:disabled { opacity: .45; cursor: not-allowed; }
+        .btn-sec    { background: var(--sur2); color: var(--txt); border: 1px solid var(--brd); padding: 11px; border-radius: 6px; font-weight: 800; font-size: .78rem; letter-spacing: .5px; cursor: pointer; transition: .15s; text-align: center; display: flex; align-items: center; justify-content: center; }
+        .btn-sec:hover { border-color: var(--txt2); }
+        .btn-zip    { width: 100%; margin-top: 10px; background: var(--acc2); color: #fff; border: none; padding: 10px; border-radius: 6px; font-weight: 800; font-size: .78rem; cursor: pointer; transition: .15s; }
+        .btn-zip:hover { filter: brightness(1.1); }
+
+        /* Cold start notice */
+        .cold-notice { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 10px 14px; background: rgba(251,191,36,.07); border: 1px solid rgba(251,191,36,.35); border-radius: 7px; font-size: .75rem; color: var(--txt); }
+        .light .cold-notice { color: #0a0a0a; }
+        .spin { width: 13px; height: 13px; border: 2px solid rgba(251,191,36,.3); border-top-color: #fbbf24; border-radius: 50%; animation: spin .75s linear infinite; flex-shrink: 0; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Progress bar */
+        .prog-track { position: relative; height: 26px; background: var(--sur2); border: 1px solid var(--brd); border-radius: 6px; overflow: hidden; margin-top: 12px; }
+        .prog-bar   { height: 100%; background: var(--acc); border-radius: 6px; transition: width .5s ease; }
+        .prog-label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: .68rem; font-weight: 800; color: #000; mix-blend-mode: difference; letter-spacing: 1px; }
+
+        /* Track list */
+        .track-list { list-style: none; display: grid; grid-template-columns: repeat(auto-fill,minmax(270px,1fr)); gap: 7px; margin-top: 14px; }
+        .track-item { display: flex; align-items: center; gap: 9px; padding: 9px 12px; border-radius: 7px; border: 1px solid var(--brd); background: var(--sur2); cursor: pointer; transition: .15s; font-size: .78rem; color: var(--txt); }
+        .track-item:hover  { border-color: var(--txt2); }
+        .track-item.active { background: var(--acc-bg); border-color: var(--acc); }
+        .t-num  { font-size: .65rem; color: var(--txt2); font-weight: 800; flex-shrink: 0; }
+        .t-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--txt); }
+        .t-badge      { font-size: .65rem; font-weight: 800; flex-shrink: 0; }
+        .t-badge.done { color: var(--acc); }
+        .t-badge.proc { color: #fbbf24; }
+
+        /* Monitor */
+        .mon-row   { display: flex; gap: 16px; align-items: flex-start; }
+        .mon-ctrl  { width: 108px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; }
+        .mon-label { font-size: .72rem; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
+        .orig-lbl  { color: var(--acc); }
+        .mast-lbl  { color: var(--acc2); }
+        .meter-box { display: flex; flex-direction: column; gap: 3px; }
+        .meter-row { display: flex; justify-content: space-between; font-size: .68rem; }
+        .meter-row span:first-child { color: var(--txt2); }
+        .mval      { color: var(--acc); font-weight: 700; }
+        .mval.pro  { color: var(--acc2); }
+        .btn-play  { width: 100%; padding: 6px; border: 1px solid var(--brd); background: var(--sur2); color: var(--txt); border-radius: 5px; font-size: .7rem; font-weight: 800; cursor: pointer; transition: .15s; }
+        .btn-play:hover:not(:disabled) { border-color: var(--txt2); }
+        .btn-play:disabled { opacity: .3; cursor: not-allowed; }
+        .btn-dl   { display: block; text-align: center; margin-top: 5px; padding: 6px; border-radius: 5px; background: var(--acc2); color: #fff; font-size: .7rem; font-weight: 800; text-decoration: none; }
+        .mon-wave  { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+        .time-row  { text-align: right; font-size: .68rem; color: var(--txt2); font-weight: 700; margin-bottom: 5px; }
+        .wave-box  { width: 100%; height: 148px; background: var(--sur2); border: 1px solid var(--brd); border-radius: 8px; position: relative; overflow: hidden; cursor: pointer; }
+        canvas     { width: 100%; height: 100%; display: block; }
+        .seeker    { position: absolute; top: 0; bottom: 0; width: 2px; pointer-events: none; }
+        .sk-orig   { background: var(--acc);  box-shadow: 0 0 7px rgba(74,222,128,.6); }
+        .sk-mast   { background: var(--acc2); box-shadow: 0 0 7px rgba(96,165,250,.6); }
+        .no-file   { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: .8rem; color: var(--txt2); }
+
+        /* Presets */
+        .preset-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(130px,1fr)); gap: 10px; }
+        .btn-preset  { background: var(--sur2); color: var(--txt); border: 1px solid var(--brd); padding: 14px 10px; border-radius: 8px; font-weight: 800; font-size: .76rem; cursor: pointer; transition: .18s; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+        .btn-preset:hover:not(:disabled) { border-color: var(--acc); background: var(--acc-bg); color: var(--txt); }
+        .btn-preset:disabled { opacity: .3; cursor: not-allowed; }
+        .p-icon { font-size: 1.3rem; }
+
+        /* Controls */
+        .ctrl-grid  { display: grid; grid-template-columns: repeat(auto-fit,minmax(255px,1fr)); gap: 14px; }
+        .ctrl-group { background: var(--sur2); padding: 17px; border-radius: 8px; border: 1px solid var(--brd); }
+        .g-title    { font-size: .68rem; font-weight: 800; letter-spacing: 1.2px; text-transform: uppercase; padding-bottom: 10px; margin-bottom: 14px; border-bottom: 1px solid var(--brd); color: var(--txt); }
+        .sel-row    { margin-bottom: 11px; }
+        .sel-row label { font-size: .68rem; color: var(--txt2); display: block; margin-bottom: 4px; }
+        .sel        { width: 100%; background: var(--sur); color: var(--txt); border: 1px solid var(--brd); padding: 7px 9px; border-radius: 5px; font-size: .76rem; font-family: inherit; }
+        .sel:disabled { opacity: .35; }
+        /* Light 모드 select 글씨 검정 보장 */
+        .light .sel { color: #0a0a0a; }
+        .sld-row    { display: flex; align-items: center; gap: 10px; margin-bottom: 11px; }
+        .sld-label  { font-size: .7rem; color: var(--txt2); width: 105px; flex-shrink: 0; }
+        .sld-label.acc { color: var(--acc); }
+        .sld-row input[type="range"] { flex: 1; accent-color: var(--acc); cursor: pointer; }
+        .sld-row input[type="range"]:disabled { opacity: .3; cursor: not-allowed; }
+        .sld-val    { width: 54px; font-size: .68rem; text-align: right; color: var(--acc); font-weight: 700; }
+
+        /* Hero */
+        .hero        { text-align: center; padding: 110px 0; }
+        .hero-eyebrow { font-size: .7rem; letter-spacing: 3px; text-transform: uppercase; color: var(--txt2); margin-bottom: 18px; }
+        .hero-title  { font-size: 5.5rem; font-weight: 900; letter-spacing: -5px; line-height: .85; color: var(--txt); margin-bottom: 48px; }
+        .hero .btn-prime { font-size: .88rem; padding: 13px 30px; border-radius: 8px; }
+
+        /* Light 모드 전역 색상 강제 */
+        .light { color: #0a0a0a; }
+        .light .tier-chip, .light .panel-top span, .light .t-num,
+        .light .drop-sub, .light .time-row, .light .meter-row span:first-child,
+        .light .sld-label, .light .sel-row label, .light .txt2-cls { color: #555555; }
       `}} />
     </main>
   )
