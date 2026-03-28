@@ -6,10 +6,10 @@ import JSZip from 'jszip'
 
 const supabaseUrl = 'https://vjjowuamlwnuagaacind.supabase.co'
 const supabaseKey = 'sb_publishable_6dZKot10ye-Ii1OEw1d_Mg_ZFodzHjE'
-const supabase     = createClient(supabaseUrl, supabaseKey)
-const ENGINE_URL   = process.env.NEXT_PUBLIC_ENGINE_URL   ?? 'https://thisismidi-thisismidi-mastering-engine.hf.space/master'
-const DEV_EMAIL    = process.env.NEXT_PUBLIC_DEV_EMAIL    ?? ''
-const MAX_MB       = 100
+const supabase    = createClient(supabaseUrl, supabaseKey)
+const ENGINE_URL  = process.env.NEXT_PUBLIC_ENGINE_URL ?? 'https://thisismidi-thisismidi-mastering-engine.hf.space/master'
+const DEV_EMAIL   = process.env.NEXT_PUBLIC_DEV_EMAIL  ?? ''
+const MAX_MB      = 100
 
 type ToastType = 'success' | 'error' | 'warn' | 'info'
 interface Toast { id: number; msg: string; type: ToastType }
@@ -34,6 +34,7 @@ export default function Home() {
   const [user, setUser]               = useState<any>(null)
   const [tier, setTier]               = useState('FREE')
   const [isDark, setIsDark]           = useState(true)
+  const [isDragOver, setIsDragOver]   = useState(false)
 
   const [files, setFiles]             = useState<File[]>([])
   const [masteredUrls, setMasteredUrls] = useState<Record<number, string>>({})
@@ -67,13 +68,13 @@ export default function Home() {
   const [outSR, setOutSR]             = useState('44100')
   const [outBit, setOutBit]           = useState('16')
 
-  const origAudioRef  = useRef<HTMLAudioElement>(null)
-  const mastAudioRef  = useRef<HTMLAudioElement>(null)
-  const origCanvas    = useRef<HTMLCanvasElement>(null)
-  const mastCanvas    = useRef<HTMLCanvasElement>(null)
-  const audioCtxRef   = useRef<AudioContext | null>(null)
-  const sourceNodes   = useRef<Map<HTMLAudioElement, any>>(new Map())
-  const rafIdRef      = useRef<number | null>(null)
+  const origAudioRef = useRef<HTMLAudioElement>(null)
+  const mastAudioRef = useRef<HTMLAudioElement>(null)
+  const origCanvas   = useRef<HTMLCanvasElement>(null)
+  const mastCanvas   = useRef<HTMLCanvasElement>(null)
+  const audioCtxRef  = useRef<AudioContext | null>(null)
+  const sourceNodes  = useRef<Map<HTMLAudioElement, any>>(new Map())
+  const rafIdRef     = useRef<number | null>(null)
 
   const [toasts, setToasts] = useState<Toast[]>([])
   const toastId = useRef(0)
@@ -198,8 +199,8 @@ export default function Home() {
     }
   }
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = Array.from(e.target.files || [])
+  // ── 파일 공통 처리 (클릭 + 드래그 공통 사용)
+  const processFiles = (selected: File[]) => {
     const limit    = isPro ? 15 : 1
     const oversize = selected.filter(f => f.size > MAX_MB * 1024 * 1024)
     if (oversize.length > 0) { toast(`파일이 너무 큽니다. 최대 ${MAX_MB}MB (${oversize[0].name})`, 'error'); return }
@@ -208,6 +209,24 @@ export default function Home() {
       setFiles(selected.slice(0, limit))
     } else { setFiles(selected) }
     setActiveIndex(0); setMasteredUrls({}); setOrigPlaying(false); setMastPlaying(false)
+  }
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    processFiles(Array.from(e.target.files || []))
+  }
+
+  // ── 드래그 앤 드롭
+  const handleDragOver = (e: React.DragEvent<HTMLLabelElement>) => {
+    e.preventDefault(); e.stopPropagation(); setIsDragOver(true)
+  }
+  const handleDragLeave = (e: React.DragEvent<HTMLLabelElement>) => {
+    e.preventDefault(); setIsDragOver(false)
+  }
+  const handleDrop = (e: React.DragEvent<HTMLLabelElement>) => {
+    e.preventDefault(); e.stopPropagation(); setIsDragOver(false)
+    const dropped = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('audio/'))
+    if (dropped.length === 0) { toast('오디오 파일만 업로드 가능합니다.', 'warn'); return }
+    processFiles(dropped)
   }
 
   const applyPreset = (genre: string) => {
@@ -349,17 +368,26 @@ export default function Home() {
                 <span>{files.length} / {isPro ? 15 : 1} tracks</span>
               </div>
               <input type="file" id="u-file" hidden multiple onChange={handleFileUpload} accept="audio/*" />
-              <label htmlFor="u-file" className="drop-zone">
-                <span className="drop-icon">🎵</span>
-                <span className="drop-main">Drop audio files here or click to browse</span>
+              <label
+                htmlFor="u-file"
+                className={`drop-zone${isDragOver ? ' drag-over' : ''}`}
+                onDragOver={handleDragOver}
+                onDragEnter={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+              >
+                <span className="drop-icon">{isDragOver ? '📂' : '🎵'}</span>
+                <span className="drop-main">{isDragOver ? '여기에 놓으세요!' : 'Drop audio files here or click to browse'}</span>
                 <span className="drop-sub">MP3 · WAV · FLAC · AIFF &nbsp;|&nbsp; Max {MAX_MB}MB per file</span>
               </label>
+
               <div className="action-row">
                 <label htmlFor="u-file" className="btn-sec">UPLOAD</label>
                 <button className="btn-prime" onClick={runBatchMastering} disabled={isProcessing || files.length === 0}>
                   {btnLabel()}
                 </button>
               </div>
+
               {engineStatus === 'warming' && (
                 <div className="cold-notice">
                   <span className="spin" />
@@ -562,7 +590,8 @@ export default function Home() {
         .lock { font-size: .65rem; background: var(--sur2); border: 1px solid var(--brd); padding: 2px 8px; border-radius: 50px; color: var(--txt2); }
         .drop-zone  { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 88px; border: 1px dashed var(--brd); border-radius: 8px; cursor: pointer; transition: .2s; background: var(--sur2); padding: 20px; }
         .drop-zone:hover { border-color: var(--acc); background: var(--acc-bg); }
-        .drop-icon  { font-size: 1.4rem; }
+        .drop-zone.drag-over { border-color: var(--acc); background: var(--acc-bg); border-style: solid; transform: scale(1.01); }
+        .drop-icon  { font-size: 1.6rem; transition: .2s; }
         .drop-main  { font-size: .83rem; font-weight: 600; color: var(--txt); }
         .drop-sub   { font-size: .7rem; color: var(--txt2); }
         .action-row { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; margin-top: 12px; }
