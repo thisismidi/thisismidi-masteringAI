@@ -2,6 +2,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import JSZip from 'jszip'
 
 const supabaseUrl = 'https://vjjowuamlwnuagaacind.supabase.co'
@@ -14,7 +15,6 @@ const MAX_MB      = 50
 type ToastType = 'success' | 'error' | 'warn' | 'info'
 interface Toast { id: number; msg: string; type: ToastType }
 type EngineStatus = 'idle' | 'warming' | 'running'
-type ActiveTab = 'mastering' | 'mixing'
 
 function SliderRow({ label, min, max, step, value, onChange, unit, disabled, accent }: {
   label: string; min: number; max: number; step: number
@@ -53,11 +53,12 @@ async function measureFilePeak(url: string): Promise<{ lufs: number; tp: number 
 }
 
 export default function Home() {
+  const router = useRouter()
+
   const [user, setUser]               = useState<any>(null)
   const [tier, setTier]               = useState('FREE')
   const [isDark, setIsDark]           = useState(true)
   const [isDragOver, setIsDragOver]   = useState(false)
-  const [activeTab, setActiveTab]     = useState<ActiveTab>('mastering')
 
   const [files, setFiles]             = useState<File[]>([])
   const [masteredUrls, setMasteredUrls] = useState<Record<number, string>>({})
@@ -251,8 +252,7 @@ export default function Home() {
   }
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => processFiles(Array.from(e.target.files || []))
-
-  const handleDragOver = (e: React.DragEvent<HTMLLabelElement>) => { e.preventDefault(); e.stopPropagation(); setIsDragOver(true) }
+  const handleDragOver  = (e: React.DragEvent<HTMLLabelElement>) => { e.preventDefault(); e.stopPropagation(); setIsDragOver(true) }
   const handleDragLeave = (e: React.DragEvent<HTMLLabelElement>) => { e.preventDefault(); setIsDragOver(false) }
   const handleDrop = (e: React.DragEvent<HTMLLabelElement>) => {
     e.preventDefault(); e.stopPropagation(); setIsDragOver(false)
@@ -364,6 +364,7 @@ export default function Home() {
       </div>
 
       <div className="ws">
+
         {/* ── 글로벌 헤더 ── */}
         <header className="hd">
           <div className="brand">THISISMIDI <span className="acc">.</span></div>
@@ -377,18 +378,7 @@ export default function Home() {
           </div>
         </header>
 
-        {/* ── 탭 네비게이션 ── */}
-        <nav className="tab-nav">
-          <button className={`tab-btn${activeTab === 'mastering' ? ' active' : ''}`} onClick={() => setActiveTab('mastering')}>
-            <span className="tab-icon">🎛</span> AI Mastering
-          </button>
-          <button className={`tab-btn${activeTab === 'mixing' ? ' active' : ''}`} onClick={() => setActiveTab('mixing')}>
-            <span className="tab-icon">🎚</span> AI Mixing
-            <span className="tab-soon">SOON</span>
-          </button>
-        </nav>
-
-        {/* ── 로그인 히어로 ── */}
+        {/* ── 로그인 전: 히어로만 표시 ── */}
         {!user ? (
           <div className="hero">
             <p className="hero-eyebrow">Professional AI Music Tools</p>
@@ -397,176 +387,163 @@ export default function Home() {
               Start with Google →
             </button>
           </div>
+
         ) : (
           <>
-            {/* ══════════════ AI MASTERING TAB ══════════════ */}
-            {activeTab === 'mastering' && (
-              <div className="layout">
+            {/* ── 탭 네비게이션 (로그인 후에만 표시) ── */}
+            <nav className="tab-nav">
+              <button className="tab-btn active">
+                <span className="tab-icon">🎛</span> AI Mastering
+              </button>
+              <button className="tab-btn" onClick={() => router.push('/mixing')}>
+                <span className="tab-icon">🎚</span> AI Mixing
+              </button>
+            </nav>
 
-                <section className="panel">
-                  <div className="panel-top">
-                    <h3>Track Queue</h3>
-                    <span>{files.length} / {isPro ? 15 : 1} tracks</span>
-                  </div>
-                  <input type="file" id="u-file" hidden multiple onChange={handleFileUpload} accept="audio/*" />
-                  <label htmlFor="u-file" className={`drop-zone${isDragOver ? ' drag-over' : ''}`}
-                    onDragOver={handleDragOver} onDragEnter={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
-                    <span className="drop-icon">{isDragOver ? '📂' : '🎵'}</span>
-                    <span className="drop-main">{isDragOver ? '여기에 놓으세요!' : 'Drop audio files here or click to browse'}</span>
-                    <span className="drop-sub">MP3 · WAV · FLAC · AIFF &nbsp;|&nbsp; Max {MAX_MB}MB per file</span>
-                  </label>
-                  <div className="action-row">
-                    <label htmlFor="u-file" className="btn-sec">UPLOAD</label>
-                    <button className="btn-prime" onClick={runBatchMastering} disabled={isProcessing || files.length === 0}>{btnLabel()}</button>
-                  </div>
-                  {engineStatus === 'warming' && <div className="cold-notice"><span className="spin" />AI 엔진을 깨우는 중입니다. 처음 실행 시 최대 30초 소요될 수 있어요.</div>}
-                  {isProcessing && progress.total > 0 && (
-                    <div className="prog-track"><div className="prog-bar" style={{ width: `${progressPct}%` }} /><span className="prog-label">{Math.round(progressPct)}%</span></div>
-                  )}
-                  {Object.keys(masteredUrls).length > 1 && <button className="btn-zip" onClick={downloadZip}>📥 DOWNLOAD ALL AS ZIP</button>}
-                  <ul className="track-list">
-                    {files.map((f, i) => (
-                      <li key={i} className={`track-item${activeIndex === i ? ' active' : ''}`}
-                        onClick={() => { setActiveIndex(i); setOrigPlaying(false); setMastPlaying(false); origAnalyzer.current = null; mastAnalyzer.current = null }}>
-                        <span className="t-num">{String(i + 1).padStart(2, '0')}</span>
-                        <span className="t-name">{f.name}</span>
-                        {isProcessing && progress.cur === i + 1 && engineStatus === 'running' && <span className="t-badge proc">◎</span>}
-                        {masteredUrls[i] && <span className="t-badge done">✓</span>}
-                        {!isProcessing && <button className="t-remove" onClick={e => removeTrack(e, i)} title="트랙 삭제">✕</button>}
-                      </li>
-                    ))}
-                  </ul>
-                </section>
+            {/* ══════════════ AI MASTERING ══════════════ */}
+            <div className="layout">
 
-                <section className="panel">
-                  <div className="panel-top"><h3>A / B Monitor</h3><span>{files[activeIndex]?.name || '—'}</span></div>
-                  <div className="mon-row">
-                    <div className="mon-ctrl">
-                      <p className="mon-label orig-lbl">Original</p>
-                      <div className="meter-box">
-                        <div className="meter-row"><span>Integrated</span><span className="mval">{origLufs} <span className="munit">LUFS</span></span></div>
-                        <div className="meter-row"><span>Output</span><span className="mval">{origTp} <span className="munit">dBFS</span></span></div>
-                      </div>
-                      <button className="btn-play" onClick={() => togglePlay('orig')}>{origPlaying ? '■ STOP' : '▶ PLAY'}</button>
-                    </div>
-                    <div className="mon-wave">
-                      <div className="time-row">{fmt(origTime)} / {fmt(origDur)}</div>
-                      <div className="wave-box" onClick={e => handleSeek(e, origAudioRef, origDur, 'orig')}>
-                        <canvas ref={origCanvas} width={1000} height={140} />
-                        <div className="seeker sk-orig" style={{ left: origDur > 0 ? `${(origTime / origDur) * 100}%` : '0' }} />
-                      </div>
-                    </div>
-                    <audio ref={origAudioRef} src={currentOrigUrl}
-                      onTimeUpdate={e => setOrigTime(e.currentTarget.currentTime)}
-                      onLoadedMetadata={e => setOrigDur(e.currentTarget.duration)}
-                      onEnded={() => { setOrigPlaying(false); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); measureFilePeak(currentOrigUrl).then(({ lufs, tp }) => { setOrigLufs(lufs); setOrigTp(tp) }) }} />
-                  </div>
-                  <div className="mon-row" style={{ marginTop: 20 }}>
-                    <div className="mon-ctrl">
-                      <p className="mon-label mast-lbl">Mastered</p>
-                      <div className="meter-box">
-                        <div className="meter-row"><span>Integrated</span><span className="mval pro">{mastLufs} <span className="munit">LUFS</span></span></div>
-                        <div className="meter-row"><span>Output</span><span className="mval pro">{mastTp} <span className="munit">dBFS</span></span></div>
-                      </div>
-                      <button className="btn-play" onClick={() => togglePlay('mast')} disabled={!masteredUrls[activeIndex]}>{mastPlaying ? '■ STOP' : '▶ PLAY'}</button>
-                      {masteredUrls[activeIndex] && <a className="btn-dl" href={masteredUrls[activeIndex]} download={getDownloadName()}>↓ DOWNLOAD</a>}
-                    </div>
-                    <div className="mon-wave">
-                      <div className="time-row">{fmt(mastTime)} / {fmt(mastDur)}</div>
-                      <div className="wave-box" onClick={e => handleSeek(e, mastAudioRef, mastDur, 'mast')}>
-                        <canvas ref={mastCanvas} width={1000} height={140} />
-                        <div className="seeker sk-mast" style={{ left: mastDur > 0 ? `${(mastTime / mastDur) * 100}%` : '0' }} />
-                        {!masteredUrls[activeIndex] && <div className="no-file">No mastered file yet</div>}
-                      </div>
-                    </div>
-                    <audio ref={mastAudioRef} src={masteredUrls[activeIndex] || ''}
-                      onTimeUpdate={e => setMastTime(e.currentTarget.currentTime)}
-                      onLoadedMetadata={e => setMastDur(e.currentTarget.duration)}
-                      onEnded={() => { setMastPlaying(false); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); const url = masteredUrls[activeIndex]; if (url) measureFilePeak(url).then(({ lufs, tp }) => { setMastLufs(lufs); setMastTp(tp) }) }} />
-                  </div>
-                </section>
-
-                <section className="panel">
-                  <div className="panel-top">
-                    <h3>Mastering Presets</h3>
-                    <div className="preset-top-right">
-                      {!isPro && <span className="lock">PRO ONLY 🔒</span>}
-                      <button className="btn-default" onClick={resetToDefault}>↺ Default</button>
-                    </div>
-                  </div>
-                  <div className="preset-grid">
-                    {[{ key: 'Hiphop', icon: '🎤', label: 'Hiphop' }, { key: 'Electronic', icon: '⚡', label: 'Electronic' }, { key: 'RnB', icon: '🎸', label: 'R&B' }, { key: 'Film', icon: '🎬', label: 'Film Music' }, { key: 'Ambient', icon: '🌊', label: 'Ambient' }]
-                      .map(({ key, icon, label }) => (
-                        <button key={key} className="btn-preset" onClick={() => applyPreset(key)} disabled={!isPro}>
-                          <span className="p-icon">{icon}</span><span>{label}</span>
-                        </button>
-                      ))}
-                  </div>
-                </section>
-
-                <section className="panel">
-                  <div className="panel-top"><h3>Mastering Controls</h3>{!isPro && <span className="lock">PRO ONLY 🔒</span>}</div>
-                  <div className="ctrl-grid">
-                    <div className="ctrl-group">
-                      <p className="g-title">Output Format</p>
-                      <div className="sel-row"><label>Format</label>
-                        <select className="sel" value={outFormat} onChange={e => setOutFormat(e.target.value)} disabled={!isPro}>
-                          <option value="MP3">MP3</option>{isPro && <><option value="WAV">WAV</option><option value="FLAC">FLAC</option></>}
-                        </select></div>
-                      <div className="sel-row"><label>Sample Rate</label>
-                        <select className="sel" value={outSR} onChange={e => setOutSR(e.target.value)} disabled={!isPro}>
-                          <option value="44100">44.1 kHz</option>{isPro && <><option value="48000">48 kHz</option><option value="96000">96 kHz</option></>}
-                        </select></div>
-                      <div className="sel-row"><label>Bit Depth</label>
-                        <select className="sel" value={outBit} onChange={e => setOutBit(e.target.value)} disabled={!isPro}>
-                          <option value="16">16-bit</option>{isPro && <><option value="24">24-bit</option><option value="32">32-bit float</option></>}
-                        </select></div>
-                    </div>
-                    <div className="ctrl-group">
-                      <p className="g-title">Loudness &amp; Safety</p>
-                      <SliderRow label="Target LUFS" min={-24} max={-6}   step={0.5} value={targetLufs} onChange={setTargetLufs} unit=""      />
-                      <SliderRow label="Out Ceiling" min={-3}  max={-0.1} step={0.1} value={truePeak}   onChange={setTruePeak}   unit=" dBFS" />
-                      <SliderRow label="Presence"    min={0}   max={100}  step={1}   value={presence}   onChange={setPresence}   unit="%"     disabled={!isPro} accent />
-                    </div>
-                    <div className="ctrl-group">
-                      <p className="g-title">Tone Character</p>
-                      <SliderRow label="Warmth"       min={0} max={100} step={1} value={warmth} onChange={setWarmth} unit="%" disabled={!isPro} />
-                      <SliderRow label="Treble (Air)" min={0} max={100} step={1} value={treble} onChange={setTreble} unit="%" disabled={!isPro} />
-                    </div>
-                    <div className="ctrl-group">
-                      <p className="g-title">Stereo, Space &amp; Dynamics</p>
-                      <SliderRow label="Stereo Width" min={0} max={200} step={1} value={stereoWidth} onChange={setStereoWidth} unit="%" disabled={!isPro} />
-                      <SliderRow label="Space Depth"  min={0} max={100} step={1} value={spaceDepth}  onChange={setSpaceDepth}  unit="%" disabled={!isPro} />
-                      <SliderRow label="Mono Bass"    min={0} max={100} step={1} value={monoBass}    onChange={setMonoBass}    unit="%" disabled={!isPro} />
-                      <SliderRow label="Vari-Mu Glue" min={0} max={100} step={1} value={glueComp}    onChange={setGlueComp}    unit="%" disabled={!isPro} accent />
-                    </div>
-                  </div>
-                </section>
-
-              </div>
-            )}
-
-            {/* ══════════════ AI MIXING TAB ══════════════ */}
-            {activeTab === 'mixing' && (
-              <div className="mixing-coming">
-                <div className="mixing-glow" />
-                <p className="mixing-eyebrow">Coming Soon</p>
-                <h2 className="mixing-title">AI Mixing</h2>
-                <p className="mixing-desc">
-                  DAW에서 완성한 트랙을 업로드하면<br />
-                  AI가 EQ, Compression, Stereo, FX를 분석하고<br />
-                  믹싱 방향을 제안해드립니다.
-                </p>
-                <div className="mixing-features">
-                  {['🎚 EQ 분석 & 제안', '🥁 드럼 버스 처리', '🎸 악기별 밸런스', '🌊 리버브 & 딜레이', '📊 주파수 충돌 감지', '🎯 장르별 믹싱 프리셋'].map(f => (
-                    <span key={f} className="mix-feat">{f}</span>
-                  ))}
+              <section className="panel">
+                <div className="panel-top">
+                  <h3>Track Queue</h3>
+                  <span>{files.length} / {isPro ? 15 : 1} tracks</span>
                 </div>
-                <button className="btn-notify" onClick={() => toast('준비되면 알려드릴게요! 🎉', 'success')}>
-                  출시 알림 받기
-                </button>
-              </div>
-            )}
+                <input type="file" id="u-file" hidden multiple onChange={handleFileUpload} accept="audio/*" />
+                <label htmlFor="u-file" className={`drop-zone${isDragOver ? ' drag-over' : ''}`}
+                  onDragOver={handleDragOver} onDragEnter={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
+                  <span className="drop-icon">{isDragOver ? '📂' : '🎵'}</span>
+                  <span className="drop-main">{isDragOver ? '여기에 놓으세요!' : 'Drop audio files here or click to browse'}</span>
+                  <span className="drop-sub">MP3 · WAV · FLAC · AIFF &nbsp;|&nbsp; Max {MAX_MB}MB per file</span>
+                </label>
+                <div className="action-row">
+                  <label htmlFor="u-file" className="btn-sec">UPLOAD</label>
+                  <button className="btn-prime" onClick={runBatchMastering} disabled={isProcessing || files.length === 0}>{btnLabel()}</button>
+                </div>
+                {engineStatus === 'warming' && <div className="cold-notice"><span className="spin" />AI 엔진을 깨우는 중입니다. 처음 실행 시 최대 30초 소요될 수 있어요.</div>}
+                {isProcessing && progress.total > 0 && (
+                  <div className="prog-track"><div className="prog-bar" style={{ width: `${progressPct}%` }} /><span className="prog-label">{Math.round(progressPct)}%</span></div>
+                )}
+                {Object.keys(masteredUrls).length > 1 && <button className="btn-zip" onClick={downloadZip}>📥 DOWNLOAD ALL AS ZIP</button>}
+                <ul className="track-list">
+                  {files.map((f, i) => (
+                    <li key={i} className={`track-item${activeIndex === i ? ' active' : ''}`}
+                      onClick={() => { setActiveIndex(i); setOrigPlaying(false); setMastPlaying(false); origAnalyzer.current = null; mastAnalyzer.current = null }}>
+                      <span className="t-num">{String(i + 1).padStart(2, '0')}</span>
+                      <span className="t-name">{f.name}</span>
+                      {isProcessing && progress.cur === i + 1 && engineStatus === 'running' && <span className="t-badge proc">◎</span>}
+                      {masteredUrls[i] && <span className="t-badge done">✓</span>}
+                      {!isProcessing && <button className="t-remove" onClick={e => removeTrack(e, i)} title="트랙 삭제">✕</button>}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+
+              <section className="panel">
+                <div className="panel-top"><h3>A / B Monitor</h3><span>{files[activeIndex]?.name || '—'}</span></div>
+                <div className="mon-row">
+                  <div className="mon-ctrl">
+                    <p className="mon-label orig-lbl">Original</p>
+                    <div className="meter-box">
+                      <div className="meter-row"><span>Integrated</span><span className="mval">{origLufs} <span className="munit">LUFS</span></span></div>
+                      <div className="meter-row"><span>Output</span><span className="mval">{origTp} <span className="munit">dBFS</span></span></div>
+                    </div>
+                    <button className="btn-play" onClick={() => togglePlay('orig')}>{origPlaying ? '■ STOP' : '▶ PLAY'}</button>
+                  </div>
+                  <div className="mon-wave">
+                    <div className="time-row">{fmt(origTime)} / {fmt(origDur)}</div>
+                    <div className="wave-box" onClick={e => handleSeek(e, origAudioRef, origDur, 'orig')}>
+                      <canvas ref={origCanvas} width={1000} height={140} />
+                      <div className="seeker sk-orig" style={{ left: origDur > 0 ? `${(origTime / origDur) * 100}%` : '0' }} />
+                    </div>
+                  </div>
+                  <audio ref={origAudioRef} src={currentOrigUrl}
+                    onTimeUpdate={e => setOrigTime(e.currentTarget.currentTime)}
+                    onLoadedMetadata={e => setOrigDur(e.currentTarget.duration)}
+                    onEnded={() => { setOrigPlaying(false); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); measureFilePeak(currentOrigUrl).then(({ lufs, tp }) => { setOrigLufs(lufs); setOrigTp(tp) }) }} />
+                </div>
+                <div className="mon-row" style={{ marginTop: 20 }}>
+                  <div className="mon-ctrl">
+                    <p className="mon-label mast-lbl">Mastered</p>
+                    <div className="meter-box">
+                      <div className="meter-row"><span>Integrated</span><span className="mval pro">{mastLufs} <span className="munit">LUFS</span></span></div>
+                      <div className="meter-row"><span>Output</span><span className="mval pro">{mastTp} <span className="munit">dBFS</span></span></div>
+                    </div>
+                    <button className="btn-play" onClick={() => togglePlay('mast')} disabled={!masteredUrls[activeIndex]}>{mastPlaying ? '■ STOP' : '▶ PLAY'}</button>
+                    {masteredUrls[activeIndex] && <a className="btn-dl" href={masteredUrls[activeIndex]} download={getDownloadName()}>↓ DOWNLOAD</a>}
+                  </div>
+                  <div className="mon-wave">
+                    <div className="time-row">{fmt(mastTime)} / {fmt(mastDur)}</div>
+                    <div className="wave-box" onClick={e => handleSeek(e, mastAudioRef, mastDur, 'mast')}>
+                      <canvas ref={mastCanvas} width={1000} height={140} />
+                      <div className="seeker sk-mast" style={{ left: mastDur > 0 ? `${(mastTime / mastDur) * 100}%` : '0' }} />
+                      {!masteredUrls[activeIndex] && <div className="no-file">No mastered file yet</div>}
+                    </div>
+                  </div>
+                  <audio ref={mastAudioRef} src={masteredUrls[activeIndex] || ''}
+                    onTimeUpdate={e => setMastTime(e.currentTarget.currentTime)}
+                    onLoadedMetadata={e => setMastDur(e.currentTarget.duration)}
+                    onEnded={() => { setMastPlaying(false); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); const url = masteredUrls[activeIndex]; if (url) measureFilePeak(url).then(({ lufs, tp }) => { setMastLufs(lufs); setMastTp(tp) }) }} />
+                </div>
+              </section>
+
+              <section className="panel">
+                <div className="panel-top">
+                  <h3>Mastering Presets</h3>
+                  <div className="preset-top-right">
+                    {!isPro && <span className="lock">PRO ONLY 🔒</span>}
+                    <button className="btn-default" onClick={resetToDefault}>↺ Default</button>
+                  </div>
+                </div>
+                <div className="preset-grid">
+                  {[{ key: 'Hiphop', icon: '🎤', label: 'Hiphop' }, { key: 'Electronic', icon: '⚡', label: 'Electronic' }, { key: 'RnB', icon: '🎸', label: 'R&B' }, { key: 'Film', icon: '🎬', label: 'Film Music' }, { key: 'Ambient', icon: '🌊', label: 'Ambient' }]
+                    .map(({ key, icon, label }) => (
+                      <button key={key} className="btn-preset" onClick={() => applyPreset(key)} disabled={!isPro}>
+                        <span className="p-icon">{icon}</span><span>{label}</span>
+                      </button>
+                    ))}
+                </div>
+              </section>
+
+              <section className="panel">
+                <div className="panel-top"><h3>Mastering Controls</h3>{!isPro && <span className="lock">PRO ONLY 🔒</span>}</div>
+                <div className="ctrl-grid">
+                  <div className="ctrl-group">
+                    <p className="g-title">Output Format</p>
+                    <div className="sel-row"><label>Format</label>
+                      <select className="sel" value={outFormat} onChange={e => setOutFormat(e.target.value)} disabled={!isPro}>
+                        <option value="MP3">MP3</option>{isPro && <><option value="WAV">WAV</option><option value="FLAC">FLAC</option></>}
+                      </select></div>
+                    <div className="sel-row"><label>Sample Rate</label>
+                      <select className="sel" value={outSR} onChange={e => setOutSR(e.target.value)} disabled={!isPro}>
+                        <option value="44100">44.1 kHz</option>{isPro && <><option value="48000">48 kHz</option><option value="96000">96 kHz</option></>}
+                      </select></div>
+                    <div className="sel-row"><label>Bit Depth</label>
+                      <select className="sel" value={outBit} onChange={e => setOutBit(e.target.value)} disabled={!isPro}>
+                        <option value="16">16-bit</option>{isPro && <><option value="24">24-bit</option><option value="32">32-bit float</option></>}
+                      </select></div>
+                  </div>
+                  <div className="ctrl-group">
+                    <p className="g-title">Loudness &amp; Safety</p>
+                    <SliderRow label="Target LUFS" min={-24} max={-6}   step={0.5} value={targetLufs} onChange={setTargetLufs} unit=""      />
+                    <SliderRow label="Out Ceiling" min={-3}  max={-0.1} step={0.1} value={truePeak}   onChange={setTruePeak}   unit=" dBFS" />
+                    <SliderRow label="Presence"    min={0}   max={100}  step={1}   value={presence}   onChange={setPresence}   unit="%"     disabled={!isPro} accent />
+                  </div>
+                  <div className="ctrl-group">
+                    <p className="g-title">Tone Character</p>
+                    <SliderRow label="Warmth"       min={0} max={100} step={1} value={warmth} onChange={setWarmth} unit="%" disabled={!isPro} />
+                    <SliderRow label="Treble (Air)" min={0} max={100} step={1} value={treble} onChange={setTreble} unit="%" disabled={!isPro} />
+                  </div>
+                  <div className="ctrl-group">
+                    <p className="g-title">Stereo, Space &amp; Dynamics</p>
+                    <SliderRow label="Stereo Width" min={0} max={200} step={1} value={stereoWidth} onChange={setStereoWidth} unit="%" disabled={!isPro} />
+                    <SliderRow label="Space Depth"  min={0} max={100} step={1} value={spaceDepth}  onChange={setSpaceDepth}  unit="%" disabled={!isPro} />
+                    <SliderRow label="Mono Bass"    min={0} max={100} step={1} value={monoBass}    onChange={setMonoBass}    unit="%" disabled={!isPro} />
+                    <SliderRow label="Vari-Mu Glue" min={0} max={100} step={1} value={glueComp}    onChange={setGlueComp}    unit="%" disabled={!isPro} accent />
+                  </div>
+                </div>
+              </section>
+
+            </div>
           </>
         )}
       </div>
@@ -600,13 +577,11 @@ export default function Home() {
         .btn-sm { background:var(--sur); border:1px solid var(--brd); color:var(--txt); padding:5px 12px; border-radius:6px; cursor:pointer; font-size:.72rem; font-weight:700; letter-spacing:.5px; transition:.15s; }
         .btn-sm:hover { background:var(--sur2); border-color:var(--txt2); }
 
-        /* ── 탭 네비게이션 ── */
         .tab-nav { display:flex; gap:4px; margin-bottom:24px; border-bottom:1px solid var(--brd); padding-bottom:0; }
         .tab-btn { display:flex; align-items:center; gap:7px; padding:10px 18px; background:none; border:none; border-bottom:2px solid transparent; color:var(--txt2); font-size:.8rem; font-weight:700; cursor:pointer; transition:.15s; letter-spacing:.3px; margin-bottom:-1px; }
         .tab-btn:hover { color:var(--txt); }
         .tab-btn.active { color:var(--acc); border-bottom-color:var(--acc); }
         .tab-icon { font-size:1rem; }
-        .tab-soon { font-size:.55rem; font-weight:800; background:var(--sur2); border:1px solid var(--brd); color:var(--txt2); padding:2px 6px; border-radius:50px; letter-spacing:.5px; }
 
         .layout { display:flex; flex-direction:column; gap:20px; }
         .panel  { background:var(--sur); border:1px solid var(--brd); border-radius:12px; padding:22px; }
@@ -684,22 +659,10 @@ export default function Home() {
         .sld-row input[type="range"]:disabled { opacity:.3; cursor:not-allowed; }
         .sld-val { width:70px; flex-shrink:0; font-size:.68rem; text-align:right; color:var(--acc); font-weight:700; white-space:nowrap; }
 
-        /* ── Hero ── */
         .hero { text-align:center; padding:110px 0; }
         .hero-eyebrow { font-size:.7rem; letter-spacing:3px; text-transform:uppercase; color:var(--txt2); margin-bottom:18px; }
         .hero-title { font-size:5.5rem; font-weight:900; letter-spacing:-5px; line-height:.85; color:var(--txt); margin-bottom:48px; }
         .hero .btn-prime { font-size:.88rem; padding:13px 30px; border-radius:8px; }
-
-        /* ── AI Mixing Coming Soon ── */
-        .mixing-coming { text-align:center; padding:80px 20px; position:relative; overflow:hidden; }
-        .mixing-glow   { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:500px; height:500px; background:radial-gradient(circle, rgba(96,165,250,0.06) 0%, transparent 70%); pointer-events:none; }
-        .mixing-eyebrow { font-size:.7rem; letter-spacing:3px; text-transform:uppercase; color:var(--acc2); margin-bottom:14px; font-weight:700; }
-        .mixing-title  { font-size:3.5rem; font-weight:900; letter-spacing:-3px; color:var(--txt); margin-bottom:20px; }
-        .mixing-desc   { font-size:.92rem; color:var(--txt2); line-height:1.8; margin-bottom:40px; }
-        .mixing-features { display:flex; flex-wrap:wrap; justify-content:center; gap:10px; margin-bottom:40px; }
-        .mix-feat { background:var(--sur2); border:1px solid var(--brd); color:var(--txt2); padding:8px 16px; border-radius:50px; font-size:.75rem; font-weight:600; }
-        .btn-notify { background:var(--acc2); color:#fff; border:none; padding:12px 28px; border-radius:8px; font-size:.82rem; font-weight:800; cursor:pointer; transition:.15s; letter-spacing:.3px; }
-        .btn-notify:hover { filter:brightness(1.1); }
 
         .light { color:#0a0a0a; }
         .light .tier-chip,.light .panel-top span,.light .t-num,
