@@ -30,6 +30,35 @@ function SliderRow({ label, min, max, step, value, onChange, unit, disabled, acc
   )
 }
 
+// ── 파일을 디코딩해서 정적 피크 측정 (스트리밍 아님, 정확한 값)
+async function measureFilePeak(url: string): Promise<{ lufs: number; tp: number }> {
+  try {
+    const buf    = await (await fetch(url)).arrayBuffer()
+    const tCtx   = new AudioContext()
+    const decoded = await tCtx.decodeAudioData(buf)
+    await tCtx.close()
+
+    let peak = 0
+    let sumSq = 0
+    let totalSamples = 0
+    for (let ch = 0; ch < decoded.numberOfChannels; ch++) {
+      const data = decoded.getChannelData(ch)
+      for (let i = 0; i < data.length; i++) {
+        const v = Math.abs(data[i])
+        if (v > peak) peak = v
+        sumSq += data[i] * data[i]
+        totalSamples++
+      }
+    }
+    const tp   = peak > 0 ? Math.round(20 * Math.log10(peak) * 10) / 10 : -70
+    const rms  = Math.sqrt(sumSq / totalSamples)
+    const lufs = rms > 0 ? Math.round((20 * Math.log10(rms) - 0.691) * 10) / 10 : -70
+    return { lufs, tp }
+  } catch {
+    return { lufs: -70, tp: -70 }
+  }
+}
+
 export default function Home() {
   const [user, setUser]               = useState<any>(null)
   const [tier, setTier]               = useState('FREE')
@@ -44,8 +73,11 @@ export default function Home() {
   const [progress, setProgress]       = useState({ cur: 0, total: 0 })
   const [currentOrigUrl, setCurrentOrigUrl] = useState('')
 
+  // 정적 측정값 (파일 디코딩 기반)
   const [origLufs, setOrigLufs] = useState(-70); const [origTp, setOrigTp] = useState(-70)
   const [mastLufs, setMastLufs] = useState(-70); const [mastTp, setMastTp] = useState(-70)
+
+  // 실시간 재생 미터 (시각적 애니메이션용)
   const origMeter = useRef({ sum: 0, samples: 0, maxPeak: 0 })
   const mastMeter = useRef({ sum: 0, samples: 0, maxPeak: 0 })
 
@@ -111,22 +143,39 @@ export default function Home() {
     if (!isPro) { setOutFormat('MP3'); setOutSR('44100'); setOutBit('16') }
   }, [isPro])
 
+  // ── 원본 파일 로드 시 정적 측정
   useEffect(() => {
     if (files[activeIndex]) {
       const url = URL.createObjectURL(files[activeIndex])
       setCurrentOrigUrl(url)
+      setOrigLufs(-70); setOrigTp(-70)
       origMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
-      mastMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
-      setOrigLufs(-70); setOrigTp(-70); setMastLufs(-70); setMastTp(-70)
+      // 파일 디코딩해서 정확한 피크 측정
+      measureFilePeak(url).then(({ lufs, tp }) => {
+        setOrigLufs(lufs); setOrigTp(tp)
+      })
       return () => URL.revokeObjectURL(url)
     } else {
       setCurrentOrigUrl('')
-      clearCanvas(origCanvas.current)
-      clearCanvas(mastCanvas.current)
+      clearCanvas(origCanvas.current); clearCanvas(mastCanvas.current)
       setOrigLufs(-70); setOrigTp(-70); setMastLufs(-70); setMastTp(-70)
       setOrigTime(0); setOrigDur(0); setMastTime(0); setMastDur(0)
     }
   }, [files, activeIndex])
+
+  // ── 마스터링 완료 시 정적 측정
+  useEffect(() => {
+    const url = masteredUrls[activeIndex]
+    if (url) {
+      setMastLufs(-70); setMastTp(-70)
+      mastMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
+      measureFilePeak(url).then(({ lufs, tp }) => {
+        setMastLufs(lufs); setMastTp(tp)
+      })
+    } else {
+      setMastLufs(-70); setMastTp(-70)
+    }
+  }, [masteredUrls, activeIndex])
 
   const drawWave = async (src: File | string, canvas: HTMLCanvasElement, color: string) => {
     const ctx = canvas.getContext('2d'); if (!ctx) return
@@ -163,7 +212,7 @@ export default function Home() {
     if (!audioCtxRef.current) {
       audioCtxRef.current = new ((window as any).AudioContext || (window as any).webkitAudioContext)()
     }
-    return audioCtxRef.current as AudioContext  // ✅ null 아님을 보장
+    return audioCtxRef.current as AudioContext
   }
 
   const connectAnalyzer = (audio: HTMLAudioElement, type: 'orig' | 'mast'): AnalyserNode | null => {
@@ -171,7 +220,7 @@ export default function Home() {
     if (existing) return existing
     try {
       const ctx = getAudioCtx()
-      if (!ctx) return null  // ✅ TypeScript null 체크
+      if (!ctx) return null
       const an  = ctx.createAnalyser(); an.fftSize = 2048
       const src = ctx.createMediaElementSource(audio)
       src.connect(an); an.connect(ctx.destination)
@@ -179,29 +228,18 @@ export default function Home() {
       else                 mastAnalyzer.current = an
       return an
     } catch (e) {
-      console.warn('Analyzer connect failed (playback still works):', e)
+      console.warn('Analyzer connect failed:', e)
       return null
     }
   }
 
   const startAnalyzing = (audio: HTMLAudioElement, type: 'orig' | 'mast') => {
     if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current)
-    const an = connectAnalyzer(audio, type)
+    connectAnalyzer(audio, type)
+    // 실시간 분석은 시각적 애니메이션만 — 수치는 정적 측정값 사용
+    const an = type === 'orig' ? origAnalyzer.current : mastAnalyzer.current
     if (!an) return
-
-    const tick = () => {
-      const data = new Float32Array(an.fftSize); an.getFloatTimeDomainData(data)
-      let peak = 0, sum = 0
-      for (let i = 0; i < data.length; i++) { const v = Math.abs(data[i]); if (v > peak) peak = v; sum += data[i] * data[i] }
-      const meter = type === 'orig' ? origMeter.current : mastMeter.current
-      meter.sum += sum; meter.samples += data.length; if (peak > meter.maxPeak) meter.maxPeak = peak
-      const tp   = meter.maxPeak > 0 ? 20 * Math.log10(meter.maxPeak) : -70
-      const lufs = Math.sqrt(meter.sum / meter.samples) > 0 ? 20 * Math.log10(Math.sqrt(meter.sum / meter.samples)) - 0.691 : -70
-      const r = (v: number) => Math.round(v * 10) / 10
-      if (type === 'orig') { setOrigLufs(r(lufs)); setOrigTp(r(tp)) }
-      else                 { setMastLufs(r(lufs)); setMastTp(r(tp)) }
-      rafIdRef.current = requestAnimationFrame(tick)
-    }
+    const tick = () => { rafIdRef.current = requestAnimationFrame(tick) }
     tick()
   }
 
@@ -344,8 +382,8 @@ export default function Home() {
         const res = await fetch(ENGINE_URL, { method: 'POST', body: fd })
         if (!res.ok) throw new Error('engine error')
         const blob = await res.blob()
-        setMasteredUrls(p => ({ ...p, [i]: URL.createObjectURL(blob) }))
-        mastMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
+        const url  = URL.createObjectURL(blob)
+        setMasteredUrls(p => ({ ...p, [i]: url }))
         mastAnalyzer.current = null
         toast(`✓ ${files[i].name}`, 'success')
       } catch { toast(`처리 실패: ${files[i].name}`, 'error') }
@@ -586,7 +624,7 @@ export default function Home() {
                 <div className="ctrl-group">
                   <p className="g-title">Loudness &amp; Safety</p>
                   <SliderRow label="Target LUFS" min={-24} max={-6}   step={0.5} value={targetLufs} onChange={setTargetLufs} unit=""      />
-                  <SliderRow label="True Peak"   min={-3}  max={-0.1} step={0.1} value={truePeak}   onChange={setTruePeak}   unit=" dBTP" />
+                  <SliderRow label="Out Ceiling" min={-3}  max={-0.1} step={0.1} value={truePeak}   onChange={setTruePeak}   unit=" dBFS" />
                   <SliderRow label="Presence"    min={0}   max={100}  step={1}   value={presence}   onChange={setPresence}   unit="%"     disabled={!isPro} accent />
                 </div>
                 <div className="ctrl-group">
