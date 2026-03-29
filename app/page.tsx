@@ -30,33 +30,28 @@ function SliderRow({ label, min, max, step, value, onChange, unit, disabled, acc
   )
 }
 
-// ── 파일을 디코딩해서 정적 피크 측정 (스트리밍 아님, 정확한 값)
+// 파일 디코딩 기반 정적 측정 (로드 시 1회)
 async function measureFilePeak(url: string): Promise<{ lufs: number; tp: number }> {
   try {
-    const buf    = await (await fetch(url)).arrayBuffer()
-    const tCtx   = new AudioContext()
+    const buf     = await (await fetch(url)).arrayBuffer()
+    const tCtx    = new AudioContext()
     const decoded = await tCtx.decodeAudioData(buf)
     await tCtx.close()
-
-    let peak = 0
-    let sumSq = 0
-    let totalSamples = 0
+    let peak = 0, sumSq = 0, total = 0
     for (let ch = 0; ch < decoded.numberOfChannels; ch++) {
       const data = decoded.getChannelData(ch)
       for (let i = 0; i < data.length; i++) {
         const v = Math.abs(data[i])
         if (v > peak) peak = v
         sumSq += data[i] * data[i]
-        totalSamples++
+        total++
       }
     }
     const tp   = peak > 0 ? Math.round(20 * Math.log10(peak) * 10) / 10 : -70
-    const rms  = Math.sqrt(sumSq / totalSamples)
+    const rms  = Math.sqrt(sumSq / total)
     const lufs = rms > 0 ? Math.round((20 * Math.log10(rms) - 0.691) * 10) / 10 : -70
     return { lufs, tp }
-  } catch {
-    return { lufs: -70, tp: -70 }
-  }
+  } catch { return { lufs: -70, tp: -70 } }
 }
 
 export default function Home() {
@@ -73,11 +68,13 @@ export default function Home() {
   const [progress, setProgress]       = useState({ cur: 0, total: 0 })
   const [currentOrigUrl, setCurrentOrigUrl] = useState('')
 
-  // 정적 측정값 (파일 디코딩 기반)
-  const [origLufs, setOrigLufs] = useState(-70); const [origTp, setOrigTp] = useState(-70)
-  const [mastLufs, setMastLufs] = useState(-70); const [mastTp, setMastTp] = useState(-70)
+  // LUFS / Output — 정적(로드 시) + 실시간(재생 중) 병행
+  const [origLufs, setOrigLufs] = useState(-70)
+  const [origTp,   setOrigTp]   = useState(-70)
+  const [mastLufs, setMastLufs] = useState(-70)
+  const [mastTp,   setMastTp]   = useState(-70)
 
-  // 실시간 재생 미터 (시각적 애니메이션용)
+  // 실시간 누적 미터 ref
   const origMeter = useRef({ sum: 0, samples: 0, maxPeak: 0 })
   const mastMeter = useRef({ sum: 0, samples: 0, maxPeak: 0 })
 
@@ -143,17 +140,14 @@ export default function Home() {
     if (!isPro) { setOutFormat('MP3'); setOutSR('44100'); setOutBit('16') }
   }, [isPro])
 
-  // ── 원본 파일 로드 시 정적 측정
+  // 원본 파일 로드 → 정적 측정
   useEffect(() => {
     if (files[activeIndex]) {
       const url = URL.createObjectURL(files[activeIndex])
       setCurrentOrigUrl(url)
       setOrigLufs(-70); setOrigTp(-70)
       origMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
-      // 파일 디코딩해서 정확한 피크 측정
-      measureFilePeak(url).then(({ lufs, tp }) => {
-        setOrigLufs(lufs); setOrigTp(tp)
-      })
+      measureFilePeak(url).then(({ lufs, tp }) => { setOrigLufs(lufs); setOrigTp(tp) })
       return () => URL.revokeObjectURL(url)
     } else {
       setCurrentOrigUrl('')
@@ -163,15 +157,13 @@ export default function Home() {
     }
   }, [files, activeIndex])
 
-  // ── 마스터링 완료 시 정적 측정
+  // 마스터링 완료 → 정적 측정
   useEffect(() => {
     const url = masteredUrls[activeIndex]
     if (url) {
       setMastLufs(-70); setMastTp(-70)
       mastMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
-      measureFilePeak(url).then(({ lufs, tp }) => {
-        setMastLufs(lufs); setMastTp(tp)
-      })
+      measureFilePeak(url).then(({ lufs, tp }) => { setMastLufs(lufs); setMastTp(tp) })
     } else {
       setMastLufs(-70); setMastTp(-70)
     }
@@ -183,7 +175,7 @@ export default function Home() {
       const buf = typeof src === 'string'
         ? await (await fetch(src)).arrayBuffer()
         : await src.arrayBuffer()
-      const tCtx = new AudioContext()
+      const tCtx  = new AudioContext()
       const audio = await tCtx.decodeAudioData(buf)
       const data  = audio.getChannelData(0)
       ctx.clearRect(0, 0, canvas.width, canvas.height)
@@ -209,9 +201,8 @@ export default function Home() {
   }, [files, activeIndex, isDark, masteredUrls])
 
   const getAudioCtx = (): AudioContext => {
-    if (!audioCtxRef.current) {
+    if (!audioCtxRef.current)
       audioCtxRef.current = new ((window as any).AudioContext || (window as any).webkitAudioContext)()
-    }
     return audioCtxRef.current as AudioContext
   }
 
@@ -233,21 +224,59 @@ export default function Home() {
     }
   }
 
+  // ✅ 실시간 미터 — 재생 중 LUFS(Integrated) + Output(Peak) 업데이트
   const startAnalyzing = (audio: HTMLAudioElement, type: 'orig' | 'mast') => {
     if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current)
-    connectAnalyzer(audio, type)
-    // 실시간 분석은 시각적 애니메이션만 — 수치는 정적 측정값 사용
-    const an = type === 'orig' ? origAnalyzer.current : mastAnalyzer.current
+    const an = connectAnalyzer(audio, type)
     if (!an) return
-    const tick = () => { rafIdRef.current = requestAnimationFrame(tick) }
+
+    // 재생 시작 시 누적 초기화
+    if (type === 'orig') origMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
+    else                 mastMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
+
+    const tick = () => {
+      const data = new Float32Array(an.fftSize)
+      an.getFloatTimeDomainData(data)
+
+      let peak = 0, sum = 0
+      for (let i = 0; i < data.length; i++) {
+        const v = Math.abs(data[i])
+        if (v > peak) peak = v
+        sum += data[i] * data[i]
+      }
+
+      const meter = type === 'orig' ? origMeter.current : mastMeter.current
+      meter.sum     += sum
+      meter.samples += data.length
+      if (peak > meter.maxPeak) meter.maxPeak = peak
+
+      // Integrated LUFS (누적 RMS 기반 근사값)
+      const rms  = Math.sqrt(meter.sum / meter.samples)
+      const lufs = rms > 0 ? Math.round((20 * Math.log10(rms) - 0.691) * 10) / 10 : -70
+      // Output Peak (재생 중 최대 샘플 피크)
+      const tp   = meter.maxPeak > 0 ? Math.round(20 * Math.log10(meter.maxPeak) * 10) / 10 : -70
+
+      if (type === 'orig') { setOrigLufs(lufs); setOrigTp(tp) }
+      else                 { setMastLufs(lufs); setMastTp(tp) }
+
+      rafIdRef.current = requestAnimationFrame(tick)
+    }
     tick()
   }
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>, ref: React.RefObject<HTMLAudioElement | null>, dur: number, type: 'orig' | 'mast') => {
     if (!ref?.current || !dur) return
     ref.current.currentTime = (e.nativeEvent.offsetX / e.currentTarget.getBoundingClientRect().width) * dur
-    if (type === 'orig') origMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
-    else                 mastMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
+    // 탐색 시 누적 리셋 → 정적 측정값 복원
+    if (type === 'orig') {
+      origMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
+      const url = currentOrigUrl
+      if (url) measureFilePeak(url).then(({ lufs, tp }) => { setOrigLufs(lufs); setOrigTp(tp) })
+    } else {
+      mastMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
+      const url = masteredUrls[activeIndex]
+      if (url) measureFilePeak(url).then(({ lufs, tp }) => { setMastLufs(lufs); setMastTp(tp) })
+    }
   }
 
   const togglePlay = async (type: 'orig' | 'mast') => {
@@ -263,6 +292,8 @@ export default function Home() {
         audio.pause()
         if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current)
         setOrigPlaying(false)
+        // 정지 시 정적 측정값 복원
+        measureFilePeak(currentOrigUrl).then(({ lufs, tp }) => { setOrigLufs(lufs); setOrigTp(tp) })
       } else {
         mastAudioRef.current?.pause(); setMastPlaying(false)
         try { await audio.play(); startAnalyzing(audio, 'orig'); setOrigPlaying(true) } catch (e) { console.error(e) }
@@ -272,6 +303,8 @@ export default function Home() {
         audio.pause()
         if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current)
         setMastPlaying(false)
+        const url = masteredUrls[activeIndex]
+        if (url) measureFilePeak(url).then(({ lufs, tp }) => { setMastLufs(lufs); setMastTp(tp) })
       } else {
         origAudioRef.current?.pause(); setOrigPlaying(false)
         try { await audio.play(); startAnalyzing(audio, 'mast'); setMastPlaying(true) } catch (e) { console.error(e) }
@@ -521,12 +554,20 @@ export default function Home() {
                 <h3>A / B Monitor</h3>
                 <span>{files[activeIndex]?.name || '—'}</span>
               </div>
+
+              {/* Original */}
               <div className="mon-row">
                 <div className="mon-ctrl">
                   <p className="mon-label orig-lbl">Original</p>
                   <div className="meter-box">
-                    <div className="meter-row"><span>LUFS</span><span className="mval">{origLufs}</span></div>
-                    <div className="meter-row"><span>TP</span><span className="mval">{origTp}</span></div>
+                    <div className="meter-row">
+                      <span>Integrated</span>
+                      <span className="mval">{origLufs} <span className="munit">LUFS</span></span>
+                    </div>
+                    <div className="meter-row">
+                      <span>Output</span>
+                      <span className="mval">{origTp} <span className="munit">dBFS</span></span>
+                    </div>
                   </div>
                   <button className="btn-play" onClick={() => togglePlay('orig')}>
                     {origPlaying ? '■ STOP' : '▶ PLAY'}
@@ -542,14 +583,26 @@ export default function Home() {
                 <audio ref={origAudioRef} src={currentOrigUrl}
                   onTimeUpdate={e => setOrigTime(e.currentTarget.currentTime)}
                   onLoadedMetadata={e => setOrigDur(e.currentTarget.duration)}
-                  onEnded={() => setOrigPlaying(false)} />
+                  onEnded={() => {
+                    setOrigPlaying(false)
+                    if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current)
+                    measureFilePeak(currentOrigUrl).then(({ lufs, tp }) => { setOrigLufs(lufs); setOrigTp(tp) })
+                  }} />
               </div>
+
+              {/* Mastered */}
               <div className="mon-row" style={{ marginTop: 20 }}>
                 <div className="mon-ctrl">
                   <p className="mon-label mast-lbl">Mastered</p>
                   <div className="meter-box">
-                    <div className="meter-row"><span>LUFS</span><span className="mval pro">{mastLufs}</span></div>
-                    <div className="meter-row"><span>TP</span><span className="mval pro">{mastTp}</span></div>
+                    <div className="meter-row">
+                      <span>Integrated</span>
+                      <span className="mval pro">{mastLufs} <span className="munit">LUFS</span></span>
+                    </div>
+                    <div className="meter-row">
+                      <span>Output</span>
+                      <span className="mval pro">{mastTp} <span className="munit">dBFS</span></span>
+                    </div>
                   </div>
                   <button className="btn-play" onClick={() => togglePlay('mast')} disabled={!masteredUrls[activeIndex]}>
                     {mastPlaying ? '■ STOP' : '▶ PLAY'}
@@ -569,7 +622,12 @@ export default function Home() {
                 <audio ref={mastAudioRef} src={masteredUrls[activeIndex] || ''}
                   onTimeUpdate={e => setMastTime(e.currentTarget.currentTime)}
                   onLoadedMetadata={e => setMastDur(e.currentTarget.duration)}
-                  onEnded={() => setMastPlaying(false)} />
+                  onEnded={() => {
+                    setMastPlaying(false)
+                    if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current)
+                    const url = masteredUrls[activeIndex]
+                    if (url) measureFilePeak(url).then(({ lufs, tp }) => { setMastLufs(lufs); setMastTp(tp) })
+                  }} />
               </div>
             </section>
 
@@ -720,15 +778,16 @@ export default function Home() {
         .track-item:hover .t-remove { opacity: 1; }
         .t-remove:hover { background: rgba(248,113,113,.15); color: #f87171; }
         .mon-row   { display: flex; gap: 16px; align-items: flex-start; }
-        .mon-ctrl  { width: 108px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; }
+        .mon-ctrl  { width: 120px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; }
         .mon-label { font-size: .72rem; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
         .orig-lbl  { color: var(--acc); }
         .mast-lbl  { color: var(--acc2); }
-        .meter-box { display: flex; flex-direction: column; gap: 3px; }
-        .meter-row { display: flex; justify-content: space-between; font-size: .68rem; }
-        .meter-row span:first-child { color: var(--txt2); }
-        .mval      { color: var(--acc); font-weight: 700; }
+        .meter-box { display: flex; flex-direction: column; gap: 4px; }
+        .meter-row { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; font-size: .67rem; }
+        .meter-row span:first-child { color: var(--txt2); white-space: nowrap; }
+        .mval      { color: var(--acc); font-weight: 700; font-size: .72rem; white-space: nowrap; }
         .mval.pro  { color: var(--acc2); }
+        .munit     { font-size: .58rem; font-weight: 500; opacity: .7; }
         .btn-play  { width: 100%; padding: 6px; border: 1px solid var(--brd); background: var(--sur2); color: var(--txt); border-radius: 5px; font-size: .7rem; font-weight: 800; cursor: pointer; transition: .15s; }
         .btn-play:hover:not(:disabled) { border-color: var(--txt2); }
         .btn-play:disabled { opacity: .3; cursor: not-allowed; }
