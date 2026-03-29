@@ -54,7 +54,6 @@ export default function Home() {
   const [origPlaying, setOrigPlaying] = useState(false)
   const [mastPlaying, setMastPlaying] = useState(false)
 
-  // Output Trim 완전 제거됨
   const [targetLufs, setTargetLufs]   = useState('-14.0')
   const [truePeak, setTruePeak]       = useState('-1.0')
   const [presence, setPresence]       = useState('0')
@@ -73,7 +72,8 @@ export default function Home() {
   const origCanvas   = useRef<HTMLCanvasElement>(null)
   const mastCanvas   = useRef<HTMLCanvasElement>(null)
   const audioCtxRef  = useRef<AudioContext | null>(null)
-  const sourceNodes  = useRef<Map<HTMLAudioElement, any>>(new Map())
+  const origAnalyzer = useRef<AnalyserNode | null>(null)
+  const mastAnalyzer = useRef<AnalyserNode | null>(null)
   const rafIdRef     = useRef<number | null>(null)
 
   const [toasts, setToasts] = useState<Toast[]>([])
@@ -153,31 +153,44 @@ export default function Home() {
   useEffect(() => {
     const origColor = isDark ? '#4ade80' : '#16a34a'
     const mastColor = isDark ? '#60a5fa' : '#2563eb'
-    if (files[activeIndex] && origCanvas.current) {
-      drawWave(files[activeIndex], origCanvas.current, origColor)
-    } else { clearCanvas(origCanvas.current) }
-    if (masteredUrls[activeIndex] && mastCanvas.current) {
-      drawWave(masteredUrls[activeIndex], mastCanvas.current, mastColor)
-    } else { clearCanvas(mastCanvas.current) }
+    if (files[activeIndex] && origCanvas.current) drawWave(files[activeIndex], origCanvas.current, origColor)
+    else clearCanvas(origCanvas.current)
+    if (masteredUrls[activeIndex] && mastCanvas.current) drawWave(masteredUrls[activeIndex], mastCanvas.current, mastColor)
+    else clearCanvas(mastCanvas.current)
   }, [files, activeIndex, isDark, masteredUrls])
 
-  const ensureRouting = (audio: HTMLAudioElement) => {
-    if (!audioCtxRef.current) audioCtxRef.current = new ((window as any).AudioContext || (window as any).webkitAudioContext)()
-    const ctx = audioCtxRef.current
-    if (!ctx) return
-    if (!sourceNodes.current.has(audio)) {
-      try {
-        const src = ctx.createMediaElementSource(audio)
-        const an  = ctx.createAnalyser(); an.fftSize = 2048
-        src.connect(an); an.connect(ctx.destination)
-        sourceNodes.current.set(audio, { src, an })
-      } catch (e) { console.error(e) }
+  // ── AudioContext 초기화 (한 번만)
+  const getAudioCtx = () => {
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = new ((window as any).AudioContext || (window as any).webkitAudioContext)()
     }
-    return sourceNodes.current.get(audio)?.an
+    return audioCtxRef.current
+  }
+
+  // ── 분석기 연결 (audio element당 한 번만, 실패해도 재생은 유지)
+  const connectAnalyzer = (audio: HTMLAudioElement, type: 'orig' | 'mast'): AnalyserNode | null => {
+    const existing = type === 'orig' ? origAnalyzer.current : mastAnalyzer.current
+    if (existing) return existing
+    try {
+      const ctx = getAudioCtx()
+      const an  = ctx.createAnalyser(); an.fftSize = 2048
+      const src = ctx.createMediaElementSource(audio)
+      src.connect(an); an.connect(ctx.destination)
+      if (type === 'orig') origAnalyzer.current = an
+      else                 mastAnalyzer.current = an
+      return an
+    } catch (e) {
+      // 연결 실패해도 재생은 막지 않음
+      console.warn('Analyzer connect failed (playback still works):', e)
+      return null
+    }
   }
 
   const startAnalyzing = (audio: HTMLAudioElement, type: 'orig' | 'mast') => {
-    const an = ensureRouting(audio); if (!an) return
+    if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current)
+    const an = connectAnalyzer(audio, type)
+    if (!an) return  // 분석기 없어도 재생은 이미 시작됨
+
     const tick = () => {
       const data = new Float32Array(an.fftSize); an.getFloatTimeDomainData(data)
       let peak = 0, sum = 0
@@ -202,16 +215,41 @@ export default function Home() {
   }
 
   const togglePlay = async (type: 'orig' | 'mast') => {
-    const audio = type === 'orig' ? origAudioRef.current : mastAudioRef.current; if (!audio) return
-    if (audioCtxRef.current?.state === 'suspended') await audioCtxRef.current.resume()
+    const audio = type === 'orig' ? origAudioRef.current : mastAudioRef.current
+    if (!audio) return
+
+    // AudioContext resume (브라우저 autoplay 정책)
+    try {
+      const ctx = getAudioCtx()
+      if (ctx.state === 'suspended') await ctx.resume()
+    } catch {}
+
     if (type === 'orig') {
-      if (origPlaying) { audio.pause(); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current) }
-      else { mastAudioRef.current?.pause(); setMastPlaying(false); try { await audio.play(); startAnalyzing(audio, 'orig') } catch {} }
-      setOrigPlaying(p => !p)
+      if (origPlaying) {
+        audio.pause()
+        if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current)
+        setOrigPlaying(false)
+      } else {
+        mastAudioRef.current?.pause(); setMastPlaying(false)
+        try {
+          await audio.play()
+          startAnalyzing(audio, 'orig')
+          setOrigPlaying(true)
+        } catch (e) { console.error('Play failed:', e) }
+      }
     } else {
-      if (mastPlaying) { audio.pause(); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current) }
-      else { origAudioRef.current?.pause(); setOrigPlaying(false); try { await audio.play(); startAnalyzing(audio, 'mast') } catch {} }
-      setMastPlaying(p => !p)
+      if (mastPlaying) {
+        audio.pause()
+        if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current)
+        setMastPlaying(false)
+      } else {
+        origAudioRef.current?.pause(); setOrigPlaying(false)
+        try {
+          await audio.play()
+          startAnalyzing(audio, 'mast')
+          setMastPlaying(true)
+        } catch (e) { console.error('Play failed:', e) }
+      }
     }
   }
 
@@ -223,7 +261,10 @@ export default function Home() {
       toast(isPro ? '최대 15곡까지 처리 가능합니다.' : '무료 버전은 1곡만 가능합니다. PRO로 업그레이드하세요.', 'warn')
       setFiles(selected.slice(0, limit))
     } else { setFiles(selected) }
-    setActiveIndex(0); setMasteredUrls({}); setOrigPlaying(false); setMastPlaying(false)
+    setActiveIndex(0); setMasteredUrls({})
+    setOrigPlaying(false); setMastPlaying(false)
+    // 트랙 교체 시 분석기 초기화 (새 audio element에 다시 연결)
+    origAnalyzer.current = null; mastAnalyzer.current = null
   }
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -255,6 +296,7 @@ export default function Home() {
       else if (ki > index) newUrls[ki - 1] = v
     })
     setFiles(newFiles); setMasteredUrls(newUrls)
+    origAnalyzer.current = null; mastAnalyzer.current = null
     if (newFiles.length === 0) {
       clearCanvas(origCanvas.current); clearCanvas(mastCanvas.current)
       setActiveIndex(0)
@@ -296,16 +338,14 @@ export default function Home() {
 
   const runBatchMastering = async () => {
     if (files.length === 0) return
-    setIsProcessing(true)
-    setProgress({ cur: 0, total: files.length })
+    setIsProcessing(true); setProgress({ cur: 0, total: files.length })
     try {
       const res = await fetch(ENGINE_URL.replace('/master', '/'), { signal: AbortSignal.timeout(4000) })
       if (!res.ok && res.status !== 405) throw new Error('cold')
       setEngineStatus('running')
     } catch { await wakeUpEngine() }
     for (let i = 0; i < files.length; i++) {
-      setActiveIndex(i)
-      setProgress({ cur: i + 1, total: files.length })
+      setActiveIndex(i); setProgress({ cur: i + 1, total: files.length })
       const fd = new FormData()
       fd.append('file', files[i])
       fd.append('out_format', outFormat); fd.append('out_sample_rate', outSR); fd.append('out_bit_depth', outBit)
@@ -319,6 +359,7 @@ export default function Home() {
         const blob = await res.blob()
         setMasteredUrls(p => ({ ...p, [i]: URL.createObjectURL(blob) }))
         mastMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
+        mastAnalyzer.current = null  // 새 마스터링 결과마다 분석기 재연결
         toast(`✓ ${files[i].name}`, 'success')
       } catch { toast(`처리 실패: ${files[i].name}`, 'error') }
     }
@@ -434,7 +475,10 @@ export default function Home() {
                 {files.map((f, i) => (
                   <li key={i}
                     className={`track-item${activeIndex === i ? ' active' : ''}`}
-                    onClick={() => { setActiveIndex(i); setOrigPlaying(false); setMastPlaying(false) }}>
+                    onClick={() => {
+                      setActiveIndex(i); setOrigPlaying(false); setMastPlaying(false)
+                      origAnalyzer.current = null; mastAnalyzer.current = null
+                    }}>
                     <span className="t-num">{String(i + 1).padStart(2, '0')}</span>
                     <span className="t-name">{f.name}</span>
                     {isProcessing && progress.cur === i + 1 && engineStatus === 'running' && <span className="t-badge proc">◎</span>}
@@ -554,7 +598,7 @@ export default function Home() {
                 </div>
                 <div className="ctrl-group">
                   <p className="g-title">Loudness &amp; Safety</p>
-                  <SliderRow label="Target LUFS" min={-24} max={-6}  step={0.5} value={targetLufs} onChange={setTargetLufs} unit=""      />
+                  <SliderRow label="Target LUFS" min={-24} max={-6}   step={0.5} value={targetLufs} onChange={setTargetLufs} unit=""      />
                   <SliderRow label="True Peak"   min={-3}  max={-0.1} step={0.1} value={truePeak}   onChange={setTruePeak}   unit=" dBTP" />
                   <SliderRow label="Presence"    min={0}   max={100}  step={1}   value={presence}   onChange={setPresence}   unit="%"     disabled={!isPro} accent />
                 </div>
