@@ -9,7 +9,6 @@ import { useRouter } from 'next/navigation'
 
 const supabase = createClient(supabaseUrl, supabaseKey)
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 type StemType = 'vocal' | 'drums' | 'bass' | 'piano' | 'guitar' | 'other'
 type ToastType = 'success' | 'error' | 'warn' | 'info'
 interface Toast { id: number; msg: string; type: ToastType }
@@ -26,7 +25,6 @@ interface StemTrack {
   loading: boolean
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
 const MAX_FREE = 5
 const STEM_COLORS: Record<StemType, string> = {
   vocal: '#4ade80', drums: '#f87171', bass: '#fbbf24',
@@ -37,19 +35,17 @@ const STEM_LABELS: Record<StemType, string> = {
   piano: 'PIANO', guitar: 'GUITAR', other: 'OTHER',
 }
 
-// ─── VU Meter constants ───────────────────────────────────────────────────────
-const VU_W    = 270
-const VU_H    = 162
-const VU_CX   = 135
-const VU_CY   = 150
-const VU_R    = 112
-const VU_SA   = Math.PI * 1.111  // 200°
-const VU_EA   = Math.PI * 1.889  // 340°
-const VU_MIN  = -20
-const VU_MAX  = 3
-const VU_REF  = -18              // 0 VU = -18 dBFS
+const VU_W   = 270
+const VU_H   = 162
+const VU_CX  = 135
+const VU_CY  = 150
+const VU_R   = 112
+const VU_SA  = Math.PI * 1.111
+const VU_EA  = Math.PI * 1.889
+const VU_MIN = -20
+const VU_MAX = 3
+const VU_REF = -18
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 const uid   = () => Math.random().toString(36).slice(2)
 const dbl   = (db: number) => db <= -60 ? 0 : Math.pow(10, db / 20)
 const dbH   = (db: number) => Math.max(0, ((Math.max(-60, db) + 60) / 60) * 100)
@@ -83,19 +79,15 @@ async function analyzeRMS(file: File): Promise<number> {
   } catch { return -30 }
 }
 
-// ─── VU Meter Draw ────────────────────────────────────────────────────────────
 function drawVUDial(
   canvas: HTMLCanvasElement,
-  vuL: number,
-  vuR: number,
-  pkL: number | null,
-  pkR: number | null
+  vuL: number, vuR: number,
+  pkL: number | null, pkR: number | null
 ) {
   const c = canvas.getContext('2d')
   if (!c) return
   c.clearRect(0, 0, VU_W, VU_H)
 
-  // Face background
   c.beginPath()
   c.roundRect(1, 1, VU_W - 2, VU_H - 2, 6)
   c.fillStyle = '#f0eadb'
@@ -104,7 +96,6 @@ function drawVUDial(
   c.lineWidth = 1.5
   c.stroke()
 
-  // Red zone fill (0 VU ~ +3)
   c.beginPath()
   c.moveTo(VU_CX, VU_CY)
   c.arc(VU_CX, VU_CY, VU_R + 14, vu2a(0), VU_EA)
@@ -112,160 +103,109 @@ function drawVUDial(
   c.fillStyle = 'rgba(180,0,0,0.13)'
   c.fill()
 
-  // Arc track lines
   c.beginPath()
   c.arc(VU_CX, VU_CY, VU_R, VU_SA, vu2a(-0.5))
-  c.strokeStyle = '#555'
-  c.lineWidth = 1
-  c.stroke()
+  c.strokeStyle = '#555'; c.lineWidth = 1; c.stroke()
   c.beginPath()
   c.arc(VU_CX, VU_CY, VU_R, vu2a(-0.5), VU_EA)
-  c.strokeStyle = '#bb0000'
-  c.lineWidth = 1
-  c.stroke()
+  c.strokeStyle = '#bb0000'; c.lineWidth = 1; c.stroke()
 
-  // Tick marks + labels
   const TICKS = [
-    { v: -20, major: true,  lbl: '20'  },
-    { v: -15, major: false, lbl: ''    },
-    { v: -10, major: true,  lbl: '10'  },
-    { v: -9,  major: false, lbl: ''    },
-    { v: -8,  major: false, lbl: ''    },
-    { v: -7,  major: true,  lbl: '7'   },
-    { v: -6,  major: false, lbl: ''    },
-    { v: -5,  major: true,  lbl: '5'   },
-    { v: -4,  major: false, lbl: ''    },
-    { v: -3,  major: true,  lbl: '3'   },
-    { v: -2,  major: false, lbl: ''    },
-    { v: -1,  major: false, lbl: ''    },
-    { v:  0,  major: true,  lbl: '0'   },
-    { v:  1,  major: false, lbl: ''    },
-    { v:  2,  major: false, lbl: ''    },
-    { v:  3,  major: true,  lbl: '3'   },
+    { v: -20, major: true,  lbl: '20' },
+    { v: -15, major: false, lbl: ''   },
+    { v: -10, major: true,  lbl: '10' },
+    { v: -9,  major: false, lbl: ''   },
+    { v: -8,  major: false, lbl: ''   },
+    { v: -7,  major: true,  lbl: '7'  },
+    { v: -6,  major: false, lbl: ''   },
+    { v: -5,  major: true,  lbl: '5'  },
+    { v: -4,  major: false, lbl: ''   },
+    { v: -3,  major: true,  lbl: '3'  },
+    { v: -2,  major: false, lbl: ''   },
+    { v: -1,  major: false, lbl: ''   },
+    { v:  0,  major: true,  lbl: '0'  },
+    { v:  1,  major: false, lbl: ''   },
+    { v:  2,  major: false, lbl: ''   },
+    { v:  3,  major: true,  lbl: '3'  },
   ]
 
   TICKS.forEach(t => {
-    const a    = vu2a(t.v)
-    const isRed = t.v >= 0
-    const col  = isRed ? '#cc0000' : '#1a1a1a'
-    const rOut = VU_R + 8
-    const rIn  = t.major ? VU_R - 4 : VU_R + 2
-
+    const a = vu2a(t.v)
+    const col = t.v >= 0 ? '#cc0000' : '#1a1a1a'
+    const rOut = VU_R + 8, rIn = t.major ? VU_R - 4 : VU_R + 2
     c.beginPath()
     c.moveTo(VU_CX + Math.cos(a) * rIn,  VU_CY + Math.sin(a) * rIn)
     c.lineTo(VU_CX + Math.cos(a) * rOut, VU_CY + Math.sin(a) * rOut)
-    c.strokeStyle = col
-    c.lineWidth = t.major ? 1.8 : 0.9
-    c.stroke()
-
+    c.strokeStyle = col; c.lineWidth = t.major ? 1.8 : 0.9; c.stroke()
     if (t.lbl) {
       const rT = VU_R - 20
-      c.font = '700 9px monospace'
-      c.fillStyle = col
-      c.textAlign = 'center'
-      c.textBaseline = 'middle'
+      c.font = '700 9px monospace'; c.fillStyle = col
+      c.textAlign = 'center'; c.textBaseline = 'middle'
       c.fillText(t.lbl, VU_CX + Math.cos(a) * rT, VU_CY + Math.sin(a) * rT)
     }
   })
 
-  // End symbols (− / +)
   ;[{ v: -20, lbl: '−' }, { v: 3, lbl: '+' }].forEach(({ v, lbl }) => {
     const a = vu2a(v)
     c.font = '900 11px serif'
     c.fillStyle = v >= 0 ? '#cc0000' : '#1a1a1a'
-    c.textAlign = 'center'
-    c.textBaseline = 'middle'
+    c.textAlign = 'center'; c.textBaseline = 'middle'
     c.fillText(lbl, VU_CX + Math.cos(a) * (VU_R - 8), VU_CY + Math.sin(a) * (VU_R - 8))
   })
 
-  // "VU" label
-  c.font = '400 18px serif'
-  c.fillStyle = '#2a2a2a'
-  c.textAlign = 'center'
-  c.textBaseline = 'middle'
+  c.font = '400 18px serif'; c.fillStyle = '#2a2a2a'
+  c.textAlign = 'center'; c.textBaseline = 'middle'
   c.fillText('VU', VU_CX, VU_CY - 30)
 
-  // Peak hold needles (L=red, R=orange)
-  const peaks = [
-    { pk: pkL, col: '#cc0000' },
-    { pk: pkR, col: '#e06000' },
-  ]
-  peaks.forEach(({ pk, col }) => {
+  ;[{ pk: pkL, col: '#cc0000' }, { pk: pkR, col: '#e06000' }].forEach(({ pk, col }) => {
     if (pk === null) return
     const pa = vu2a(Math.max(VU_MIN, Math.min(VU_MAX, pk)))
     c.beginPath()
-    c.moveTo(VU_CX + Math.cos(pa) * 12, VU_CY + Math.sin(pa) * 12)
+    c.moveTo(VU_CX + Math.cos(pa) * 12,         VU_CY + Math.sin(pa) * 12)
     c.lineTo(VU_CX + Math.cos(pa) * (VU_R + 6), VU_CY + Math.sin(pa) * (VU_R + 6))
-    c.strokeStyle = col
-    c.lineWidth = 1.5
-    c.stroke()
+    c.strokeStyle = col; c.lineWidth = 1.5; c.stroke()
   })
 
-  // L needle (white)
   const naL = vu2a(Math.max(VU_MIN, Math.min(VU_MAX, vuL)))
-  c.beginPath()
-  c.moveTo(VU_CX, VU_CY)
+  c.beginPath(); c.moveTo(VU_CX, VU_CY)
   c.lineTo(VU_CX + Math.cos(naL) * (VU_R + 2), VU_CY + Math.sin(naL) * (VU_R + 2))
-  c.strokeStyle = 'rgba(0,0,0,0.12)'
-  c.lineWidth = 4
-  c.lineCap = 'round'
-  c.stroke()
-  c.beginPath()
-  c.moveTo(VU_CX, VU_CY)
+  c.strokeStyle = 'rgba(0,0,0,0.12)'; c.lineWidth = 4; c.lineCap = 'round'; c.stroke()
+  c.beginPath(); c.moveTo(VU_CX, VU_CY)
   c.lineTo(VU_CX + Math.cos(naL) * (VU_R + 2), VU_CY + Math.sin(naL) * (VU_R + 2))
-  c.strokeStyle = '#111'
-  c.lineWidth = 1.8
-  c.stroke()
-  c.beginPath()
-  c.moveTo(VU_CX, VU_CY)
+  c.strokeStyle = '#111'; c.lineWidth = 1.8; c.stroke()
+  c.beginPath(); c.moveTo(VU_CX, VU_CY)
   c.lineTo(VU_CX + Math.cos(naL + Math.PI) * 14, VU_CY + Math.sin(naL + Math.PI) * 14)
-  c.strokeStyle = '#333'
-  c.lineWidth = 2.5
-  c.stroke()
+  c.strokeStyle = '#333'; c.lineWidth = 2.5; c.stroke()
 
-  // R needle (slightly thinner, blue-ish tint)
   const naR = vu2a(Math.max(VU_MIN, Math.min(VU_MAX, vuR)))
-  c.beginPath()
-  c.moveTo(VU_CX, VU_CY)
+  c.beginPath(); c.moveTo(VU_CX, VU_CY)
   c.lineTo(VU_CX + Math.cos(naR) * (VU_R + 2), VU_CY + Math.sin(naR) * (VU_R + 2))
-  c.strokeStyle = '#1a4a8a'
-  c.lineWidth = 1.3
-  c.lineCap = 'round'
-  c.stroke()
+  c.strokeStyle = '#1a4a8a'; c.lineWidth = 1.3; c.lineCap = 'round'; c.stroke()
 
-  // Pivot
   c.beginPath(); c.arc(VU_CX, VU_CY, 9, 0, Math.PI * 2)
-  c.fillStyle = '#ccc'; c.fill()
-  c.strokeStyle = '#888'; c.lineWidth = 1; c.stroke()
-  c.beginPath(); c.arc(VU_CX, VU_CY, 5, 0, Math.PI * 2)
-  c.fillStyle = '#555'; c.fill()
-  c.beginPath(); c.arc(VU_CX, VU_CY, 2.5, 0, Math.PI * 2)
-  c.fillStyle = '#999'; c.fill()
+  c.fillStyle = '#ccc'; c.fill(); c.strokeStyle = '#888'; c.lineWidth = 1; c.stroke()
+  c.beginPath(); c.arc(VU_CX, VU_CY, 5, 0, Math.PI * 2); c.fillStyle = '#555'; c.fill()
+  c.beginPath(); c.arc(VU_CX, VU_CY, 2.5, 0, Math.PI * 2); c.fillStyle = '#999'; c.fill()
 
-  // L / R label on face
-  c.font = '600 8px monospace'
-  c.fillStyle = '#555'
-  c.textAlign = 'left'
-  c.fillText('L', 10, VU_H - 8)
-  c.fillStyle = '#1a4a8a'
-  c.fillText('R', 24, VU_H - 8)
+  c.font = '600 8px monospace'; c.textAlign = 'left'
+  c.fillStyle = '#555'; c.fillText('L', 10, VU_H - 8)
+  c.fillStyle = '#1a4a8a'; c.fillText('R', 24, VU_H - 8)
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
 export default function MixingPage() {
   const router = useRouter()
 
-  const [user,    setUser]    = useState<any>(null)
-  const [tier,    setTier]    = useState('FREE')
-  const [isDark,  setIsDark]  = useState(true)
-  const [tracks,  setTracks]  = useState<StemTrack[]>([])
-  const [isPro,   setIsPro]   = useState(false)
-  const [dragging,setDrag]    = useState(false)
-  const [editId,  setEditId]  = useState<string | null>(null)
-  const [editName,setEditNm]  = useState('')
-  const [playing, setPlaying] = useState(false)
+  const [user,      setUser]      = useState<any>(null)
+  const [tier,      setTier]      = useState('FREE')
+  const [isDark,    setIsDark]    = useState(true)
+  const [tracks,    setTracks]    = useState<StemTrack[]>([])
+  const [isPro,     setIsPro]     = useState(false)
+  const [dragging,  setDrag]      = useState(false)
+  const [editId,    setEditId]    = useState<string | null>(null)
+  const [editName,  setEditNm]    = useState('')
+  const [playing,   setPlaying]   = useState(false)
   const [vuPeakMax, setVuPeakMax] = useState<number | null>(null)
-  const [toasts,  setToasts]  = useState<Toast[]>([])
+  const [toasts,    setToasts]    = useState<Toast[]>([])
 
   const toastId = useRef(0)
   const toast = useCallback((msg: string, type: ToastType = 'info') => {
@@ -274,7 +214,6 @@ export default function MixingPage() {
     setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), 4500)
   }, [])
 
-  // ── Auth ──
   useEffect(() => {
     document.title = 'THISISMIDI — AI Mixing'
     supabase.auth.getSession().then(({ data: { session } }) => handleUser(session?.user ?? null))
@@ -289,31 +228,28 @@ export default function MixingPage() {
     setIsPro(!!pro)
   }
 
-  // ── Web Audio refs ──
-  const ctxRef      = useRef<AudioContext | null>(null)
-  const buffers     = useRef<Map<string, AudioBuffer>>(new Map())
-  const srcNodes    = useRef<Map<string, AudioBufferSourceNode>>(new Map())
-  const gainNodes   = useRef<Map<string, GainNode>>(new Map())
-  const panNodes    = useRef<Map<string, StereoPannerNode>>(new Map())
-  const masterGain  = useRef<GainNode | null>(null)
-  const anlLRef     = useRef<AnalyserNode | null>(null)
-  const anlRRef     = useRef<AnalyserNode | null>(null)
-  const playRef     = useRef(false)
- const animRef     = useRef<number | undefined>(undefined)
+  const ctxRef     = useRef<AudioContext | null>(null)
+  const buffers    = useRef<Map<string, AudioBuffer>>(new Map())
+  const srcNodes   = useRef<Map<string, AudioBufferSourceNode>>(new Map())
+  const gainNodes  = useRef<Map<string, GainNode>>(new Map())
+  const panNodes   = useRef<Map<string, StereoPannerNode>>(new Map())
+  const masterGain = useRef<GainNode | null>(null)
+  const anlLRef    = useRef<AnalyserNode | null>(null)
+  const anlRRef    = useRef<AnalyserNode | null>(null)
+  const playRef    = useRef(false)
+  const animRef    = useRef<number | undefined>(undefined)
 
-  // ── VU meter state (refs for RAF, not React state) ──
-  const vuLRef       = useRef(VU_MIN)
-  const vuRRef       = useRef(VU_MIN)
-  const pkLRef       = useRef<number | null>(null)
-  const pkRRef       = useRef<number | null>(null)
-const pkLTimer     = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-const pkRTimer     = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const vuPeakRef    = useRef<number>(-999)
-  const vuCanvasRef  = useRef<HTMLCanvasElement | null>(null)
-  const olLedRef     = useRef<HTMLDivElement | null>(null)
-  const vuPeakElRef  = useRef<HTMLSpanElement | null>(null)
-
-  const fileRef = useRef<HTMLInputElement>(null)
+  const vuLRef      = useRef(VU_MIN)
+  const vuRRef      = useRef(VU_MIN)
+  const pkLRef      = useRef<number | null>(null)
+  const pkRRef      = useRef<number | null>(null)
+  const pkLTimer    = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const pkRTimer    = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const vuPeakRef   = useRef<number>(-999)
+  const vuCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const olLedRef    = useRef<HTMLDivElement | null>(null)
+  const vuPeakElRef = useRef<HTMLSpanElement | null>(null)
+  const fileRef     = useRef<HTMLInputElement>(null)
 
   const getCtx = useCallback(() => {
     if (!ctxRef.current || ctxRef.current.state === 'closed') ctxRef.current = new AudioContext()
@@ -324,8 +260,7 @@ const pkRTimer     = useRef<ReturnType<typeof setTimeout> | undefined>(undefined
   const loadBuf = useCallback(async (track: StemTrack) => {
     try {
       const ctx = getCtx()
-      const ab  = await track.file.arrayBuffer()
-      buffers.current.set(track.id, await ctx.decodeAudioData(ab))
+      buffers.current.set(track.id, await ctx.decodeAudioData(await track.file.arrayBuffer()))
     } catch {}
   }, [getCtx])
 
@@ -333,22 +268,19 @@ const pkRTimer     = useRef<ReturnType<typeof setTimeout> | undefined>(undefined
     const isWav   = (f: File) => /\.(wav|flac|aiff?)$/i.test(f.name)
     const isAudio = (f: File) => /\.(wav|mp3|flac|aiff?|ogg)$/i.test(f.name)
     const valid = files.filter(f => {
-      if (!isAudio(f))         { toast(`${f.name}: 지원하지 않는 형식`, 'error'); return false }
-      if (isWav(f) && !isPro)  { toast('WAV / FLAC은 PRO 전용입니다 🔒', 'warn');  return false }
+      if (!isAudio(f))        { toast(`${f.name}: 지원하지 않는 형식`, 'error'); return false }
+      if (isWav(f) && !isPro) { toast('WAV / FLAC은 PRO 전용입니다 🔒', 'warn');  return false }
       return true
     })
     if (!valid.length) return
-
     setTracks(prev => {
       if (!isPro && prev.length >= MAX_FREE) { toast('무료 플랜: 최대 5트랙', 'warn'); return prev }
       const slots = isPro ? valid.length : MAX_FREE - prev.length
       const toAdd = valid.slice(0, slots)
       if (valid.length > slots) toast(`${valid.length - slots}개 추가는 PRO 필요 🔒`, 'warn')
       const nw: StemTrack[] = toAdd.map(file => ({
-        id: uid(), file,
-        name: file.name.replace(/\.[^.]+$/, ''),
-        type: guessType(file.name),
-        volume: -12, pan: 0,
+        id: uid(), file, name: file.name.replace(/\.[^.]+$/, ''),
+        type: guessType(file.name), volume: -12, pan: 0,
         muted: false, solo: false, rmsDb: -30, loading: true,
       }))
       nw.forEach(async t => {
@@ -396,43 +328,27 @@ const pkRTimer     = useRef<ReturnType<typeof setTimeout> | undefined>(undefined
     toast('트랙 삭제됨', 'info')
   }, [toast])
 
-  // ── VU animation loop ──
   const startVUAnimation = useCallback(() => {
     const tick = () => {
       if (!playRef.current) return
-      const anlL = anlLRef.current
-      const anlR = anlRRef.current
-      const canvas = vuCanvasRef.current
+      const anlL = anlLRef.current, anlR = anlRRef.current, canvas = vuCanvasRef.current
       if (!anlL || !anlR || !canvas) { animRef.current = requestAnimationFrame(tick); return }
-
-      const dL = new Float32Array(256)
-      const dR = new Float32Array(256)
-      anlL.getFloatTimeDomainData(dL)
-      anlR.getFloatTimeDomainData(dR)
-
+      const dL = new Float32Array(256), dR = new Float32Array(256)
+      anlL.getFloatTimeDomainData(dL); anlR.getFloatTimeDomainData(dR)
       let sL = 0, sR = 0
       for (let i = 0; i < 256; i++) { sL += dL[i] * dL[i]; sR += dR[i] * dR[i] }
       const dbL = Math.sqrt(sL / 256) > 1e-6 ? 20 * Math.log10(Math.sqrt(sL / 256)) : -70
       const dbR = Math.sqrt(sR / 256) > 1e-6 ? 20 * Math.log10(Math.sqrt(sR / 256)) : -70
-
-      const tgtL = Math.max(VU_MIN, Math.min(VU_MAX, dbL - VU_REF))
-      const tgtR = Math.max(VU_MIN, Math.min(VU_MAX, dbR - VU_REF))
-      vuLRef.current += (tgtL - vuLRef.current) * 0.18
-      vuRRef.current += (tgtR - vuRRef.current) * 0.18
-
-      // Peak hold (2.5s)
+      vuLRef.current += (Math.max(VU_MIN, Math.min(VU_MAX, dbL - VU_REF)) - vuLRef.current) * 0.18
+      vuRRef.current += (Math.max(VU_MIN, Math.min(VU_MAX, dbR - VU_REF)) - vuRRef.current) * 0.18
       if (vuLRef.current > (pkLRef.current ?? -999)) {
-        pkLRef.current = vuLRef.current
-        clearTimeout(pkLTimer.current)
+        pkLRef.current = vuLRef.current; clearTimeout(pkLTimer.current)
         pkLTimer.current = setTimeout(() => { pkLRef.current = null }, 2500)
       }
       if (vuRRef.current > (pkRRef.current ?? -999)) {
-        pkRRef.current = vuRRef.current
-        clearTimeout(pkRTimer.current)
+        pkRRef.current = vuRRef.current; clearTimeout(pkRTimer.current)
         pkRTimer.current = setTimeout(() => { pkRRef.current = null }, 2500)
       }
-
-      // VU Peak max hold
       const vuAvg = (vuLRef.current + vuRRef.current) / 2
       if (vuAvg > vuPeakRef.current) {
         vuPeakRef.current = vuAvg
@@ -446,28 +362,23 @@ const pkRTimer     = useRef<ReturnType<typeof setTimeout> | undefined>(undefined
         }
         setVuPeakMax(vuAvg)
       }
-
       drawVUDial(canvas, vuLRef.current, vuRRef.current, pkLRef.current, pkRRef.current)
       animRef.current = requestAnimationFrame(tick)
     }
     animRef.current = requestAnimationFrame(tick)
   }, [])
 
-  // ── Play / Stop ──
   const handlePlay = useCallback(async () => {
     const ctx = getCtx()
     srcNodes.current.forEach(s => { try { s.stop() } catch {} })
     srcNodes.current.clear(); gainNodes.current.clear(); panNodes.current.clear()
     if (animRef.current) cancelAnimationFrame(animRef.current)
-
     const mg = ctx.createGain(); mg.gain.value = 1
     const splitter = ctx.createChannelSplitter(2)
     const aL = ctx.createAnalyser(); aL.fftSize = 256
     const aR = ctx.createAnalyser(); aR.fftSize = 256
-    mg.connect(splitter); splitter.connect(aL, 0); splitter.connect(aR, 1)
-    mg.connect(ctx.destination)
+    mg.connect(splitter); splitter.connect(aL, 0); splitter.connect(aR, 1); mg.connect(ctx.destination)
     masterGain.current = mg; anlLRef.current = aL; anlRRef.current = aR
-
     const hasSolo = tracks.some(t => t.solo)
     tracks.forEach(track => {
       const buf = buffers.current.get(track.id); if (!buf) return
@@ -476,38 +387,27 @@ const pkRTimer     = useRef<ReturnType<typeof setTimeout> | undefined>(undefined
       gain.gain.value = !track.muted && (!hasSolo || track.solo) ? dbl(track.volume) : 0
       const pan = ctx.createStereoPanner(); pan.pan.value = track.pan / 100
       src.connect(gain); gain.connect(pan); pan.connect(mg); src.start(0)
-      srcNodes.current.set(track.id, src)
-      gainNodes.current.set(track.id, gain)
-      panNodes.current.set(track.id, pan)
+      srcNodes.current.set(track.id, src); gainNodes.current.set(track.id, gain); panNodes.current.set(track.id, pan)
     })
-
     if (srcNodes.current.size === 0) { toast('로드된 트랙이 없습니다. 잠시 후 다시 시도하세요.', 'error'); return }
-    playRef.current = true; setPlaying(true)
-    startVUAnimation()
+    playRef.current = true; setPlaying(true); startVUAnimation()
   }, [tracks, getCtx, toast, startVUAnimation])
 
   const handleStop = useCallback(() => {
     playRef.current = false; setPlaying(false)
     if (animRef.current) cancelAnimationFrame(animRef.current)
-    srcNodes.current.forEach(s => { try { s.stop() } catch {} })
-    srcNodes.current.clear()
-    // Reset needle to rest position
-    vuLRef.current = VU_MIN; vuRRef.current = VU_MIN
-    pkLRef.current = null; pkRRef.current = null
+    srcNodes.current.forEach(s => { try { s.stop() } catch {} }); srcNodes.current.clear()
+    vuLRef.current = VU_MIN; vuRRef.current = VU_MIN; pkLRef.current = null; pkRRef.current = null
     if (vuCanvasRef.current) drawVUDial(vuCanvasRef.current, VU_MIN, VU_MIN, null, null)
   }, [])
 
   const resetVuPeak = () => {
-    vuPeakRef.current = -999
-    setVuPeakMax(null)
+    vuPeakRef.current = -999; setVuPeakMax(null)
     if (vuPeakElRef.current) { vuPeakElRef.current.textContent = '—'; vuPeakElRef.current.style.color = '' }
     if (olLedRef.current) { olLedRef.current.style.background = '#2a0000'; olLedRef.current.style.boxShadow = 'none' }
   }
 
-  useEffect(() => {
-    if (vuCanvasRef.current) drawVUDial(vuCanvasRef.current, VU_MIN, VU_MIN, null, null)
-  }, [])
-
+  useEffect(() => { if (vuCanvasRef.current) drawVUDial(vuCanvasRef.current, VU_MIN, VU_MIN, null, null) }, [])
   useEffect(() => () => {
     playRef.current = false
     if (animRef.current) cancelAnimationFrame(animRef.current)
@@ -516,8 +416,6 @@ const pkRTimer     = useRef<ReturnType<typeof setTimeout> | undefined>(undefined
   }, [])
 
   const hasSolo = tracks.some(t => t.solo)
-
-  // ─── Theme tokens ─────────────────────────────────────────────────────────
   const C = {
     bg:      isDark ? '#080808' : '#f0f0f0',
     surface: isDark ? '#111111' : '#ffffff',
@@ -535,7 +433,6 @@ const pkRTimer     = useRef<ReturnType<typeof setTimeout> | undefined>(undefined
       fontFamily: "-apple-system, BlinkMacSystemFont, 'Plus Jakarta Sans', 'Helvetica Neue', Arial, sans-serif",
       fontSize: 14, WebkitFontSmoothing: 'antialiased', transition: 'background .25s, color .25s' }}>
 
-      {/* ── Toast ── */}
       <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 9999,
         display: 'flex', flexDirection: 'column', gap: 8, pointerEvents: 'none' }}>
         {toasts.map(t => (
@@ -543,17 +440,14 @@ const pkRTimer     = useRef<ReturnType<typeof setTimeout> | undefined>(undefined
             padding: '11px 16px', borderRadius: 8, fontSize: '.78rem', fontWeight: 600,
             border: '1px solid', maxWidth: 300, pointerEvents: 'auto',
             background: t.type === 'success' ? 'rgba(74,222,128,.12)' : t.type === 'error' ? 'rgba(248,113,113,.12)' : t.type === 'warn' ? 'rgba(251,191,36,.12)' : 'rgba(96,165,250,.12)',
-            borderColor:  t.type === 'success' ? '#4ade80' : t.type === 'error' ? '#f87171' : t.type === 'warn' ? '#fbbf24' : '#60a5fa',
+            borderColor: t.type === 'success' ? '#4ade80' : t.type === 'error' ? '#f87171' : t.type === 'warn' ? '#fbbf24' : '#60a5fa',
             color: C.text,
-          }}>
-            {t.msg}
-          </div>
+          }}>{t.msg}</div>
         ))}
       </div>
 
       <div style={{ maxWidth: 1400, margin: '0 auto', padding: 20 }}>
 
-        {/* ── Header ── */}
         <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <div style={{ fontWeight: 800, fontSize: '1.1rem', letterSpacing: '.5px' }}>
             THISISMIDI <span style={{ color: C.accent }}>.</span>
@@ -570,19 +464,15 @@ const pkRTimer     = useRef<ReturnType<typeof setTimeout> | undefined>(undefined
           </div>
         </header>
 
-        {/* ── 로그인 전 ── */}
         {!user ? (
           <div style={{ textAlign: 'center', padding: '110px 0' }}>
             <p style={{ fontSize: '.7rem', letterSpacing: 3, textTransform: 'uppercase', color: C.sub, marginBottom: 18 }}>Professional AI Music Tools</p>
             <h1 style={{ fontSize: '5.5rem', fontWeight: 900, letterSpacing: '-5px', lineHeight: .85, marginBottom: 48 }}>Sound Better,<br />Instantly.</h1>
             <button style={{ background: C.accent, color: '#000', border: 'none', padding: '13px 30px', borderRadius: 8, fontWeight: 800, fontSize: '.88rem', cursor: 'pointer' }}
-              onClick={() => supabase.auth.signInWithOAuth({ provider: 'google' })}>
-              Start with Google →
-            </button>
+              onClick={() => supabase.auth.signInWithOAuth({ provider: 'google' })}>Start with Google →</button>
           </div>
         ) : (
           <>
-            {/* ── Tab nav ── */}
             <nav style={{ display: 'flex', gap: 4, marginBottom: 24, borderBottom: `1px solid ${C.border}` }}>
               {[{ label: '🎛 AI Mastering', path: '/' }, { label: '🎚 AI Mixing', path: null }].map(tab => (
                 <button key={tab.label} onClick={() => tab.path && router.push(tab.path)}
@@ -592,13 +482,10 @@ const pkRTimer     = useRef<ReturnType<typeof setTimeout> | undefined>(undefined
                     borderBottom: !tab.path ? `2px solid ${C.accent}` : '2px solid transparent',
                     color: !tab.path ? C.accent : C.sub,
                     fontSize: '.8rem', fontWeight: 700, marginBottom: -1, transition: '.15s',
-                  }}>
-                  {tab.label}
-                </button>
+                  }}>{tab.label}</button>
               ))}
             </nav>
 
-            {/* ── Title ── */}
             <div style={{ marginBottom: 20 }}>
               <h2 style={{ fontSize: '1.5rem', fontWeight: 800, letterSpacing: '-.5px' }}>AI Mixing</h2>
               <p style={{ fontSize: '.78rem', color: C.sub, marginTop: 5 }}>
@@ -612,7 +499,6 @@ const pkRTimer     = useRef<ReturnType<typeof setTimeout> | undefined>(undefined
               style={{ display: 'none' }}
               onChange={e => { addFiles(Array.from(e.target.files || [])); e.target.value = '' }} />
 
-            {/* ── Drop zone ── */}
             {tracks.length === 0 && (
               <label htmlFor="mix-file"
                 onDragOver={e => { e.preventDefault(); setDrag(true) }}
@@ -631,13 +517,10 @@ const pkRTimer     = useRef<ReturnType<typeof setTimeout> | undefined>(undefined
               </label>
             )}
 
-            {/* ── Mixer ── */}
             {tracks.length > 0 && (
               <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
 
-                {/* Channel strips */}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  {/* Action row */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
                     <label htmlFor="mix-file" style={{ padding: '8px 14px', borderRadius: 6, border: `1px solid ${C.border}`, background: C.raised, color: C.text, fontSize: '.78rem', fontWeight: 800, cursor: 'pointer' }}>
                       + 트랙 추가
@@ -655,7 +538,6 @@ const pkRTimer     = useRef<ReturnType<typeof setTimeout> | undefined>(undefined
                     </span>
                   </div>
 
-                  {/* Channel strip cards */}
                   <div style={{ overflowX: 'auto', paddingBottom: 8 }}>
                     <div style={{ display: 'flex', gap: 10, minWidth: 'max-content' }}>
                       {tracks.map(track => {
@@ -675,7 +557,6 @@ const pkRTimer     = useRef<ReturnType<typeof setTimeout> | undefined>(undefined
                               <button onClick={() => removeTrack(track.id)} style={{ background: 'none', border: 'none', color: C.muted2, cursor: 'pointer', fontSize: 18 }}>×</button>
                             </div>
 
-                            {/* Editable name */}
                             <div style={{ padding: '7px 10px', borderBottom: `1px solid ${C.border}` }}>
                               {editId === track.id ? (
                                 <input value={editName} onChange={e => setEditNm(e.target.value)}
@@ -693,15 +574,14 @@ const pkRTimer     = useRef<ReturnType<typeof setTimeout> | undefined>(undefined
                             </div>
 
                             <div style={{ padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 14, flex: 1 }}>
-                              {/* VOLUME */}
                               <div>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
                                   <span style={{ fontSize: 10, color: C.sub, fontWeight: 800, letterSpacing: '.07em' }}>VOLUME</span>
                                   <span style={{ fontSize: 11, fontWeight: 800, color: col, fontVariantNumeric: 'tabular-nums' }}>
-                                    {track.volume <= -60 ? '-∞' : `${track.volume > 0 ? '+' : ''}${track.volume} dB`}
+                                    {track.volume <= -60 ? '-∞' : `${track.volume > 0 ? '+' : ''}${track.volume.toFixed(1)} dB`}
                                   </span>
                                 </div>
-                                <input type="range" min={-60} max={0} step={0.5} value={track.volume}
+                                <input type="range" min={-60} max={0} step={0.1} value={track.volume}
                                   onChange={e => setVol(track.id, +e.target.value)}
                                   style={{ width: '100%', accentColor: col, height: 3, appearance: 'none', WebkitAppearance: 'none', background: C.border, borderRadius: 2, cursor: 'pointer', outline: 'none' }} />
                                 <div style={{ height: 3, background: C.border, borderRadius: 2, marginTop: 5, overflow: 'hidden' }}>
@@ -709,7 +589,6 @@ const pkRTimer     = useRef<ReturnType<typeof setTimeout> | undefined>(undefined
                                 </div>
                               </div>
 
-                              {/* PAN */}
                               <div>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
                                   <span style={{ fontSize: 10, color: C.sub, fontWeight: 800, letterSpacing: '.07em' }}>PAN</span>
@@ -732,7 +611,6 @@ const pkRTimer     = useRef<ReturnType<typeof setTimeout> | undefined>(undefined
                                 </div>
                               </div>
 
-                              {/* MUTE / SOLO */}
                               <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
                                 <button onClick={() => toggleMute(track.id)} style={{ flex: 1, padding: '8px 0', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 900, letterSpacing: '.07em', background: track.muted ? '#f87171' : C.raised, color: track.muted ? '#fff' : C.sub, transition: 'all .15s', fontFamily: 'inherit' }}>MUTE</button>
                                 <button onClick={() => toggleSolo(track.id)} style={{ flex: 1, padding: '8px 0', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 900, letterSpacing: '.07em', background: track.solo ? '#fbbf24' : C.raised, color: track.solo ? '#000' : C.sub, transition: 'all .15s', fontFamily: 'inherit' }}>SOLO</button>
@@ -742,8 +620,7 @@ const pkRTimer     = useRef<ReturnType<typeof setTimeout> | undefined>(undefined
                         )
                       })}
 
-                      {/* Add track */}
-                      <label htmlFor="mix-file" onClick={() => { if (!isPro && tracks.length >= MAX_FREE) { toast('무료 플랜 최대 5트랙. PRO로 업그레이드하세요 🔒', 'warn') } }}
+                      <label htmlFor="mix-file" onClick={() => { if (!isPro && tracks.length >= MAX_FREE) toast('무료 플랜 최대 5트랙. PRO로 업그레이드하세요 🔒', 'warn') }}
                         style={{ width: 155, flexShrink: 0, minHeight: 260, border: `2px dashed ${C.border}`, borderRadius: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer', color: C.sub }}>
                         <span style={{ fontSize: 24 }}>＋</span>
                         <span style={{ fontSize: 11, fontWeight: 700 }}>트랙 추가</span>
@@ -754,24 +631,15 @@ const pkRTimer     = useRef<ReturnType<typeof setTimeout> | undefined>(undefined
                   </div>
                 </div>
 
-                {/* ══ VU METER PANEL ════════════════════════════════════ */}
                 <div style={{ width: 300, flexShrink: 0, position: 'sticky', top: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {/* Panel header */}
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.12em', color: C.sub }}>VU METER</span>
-                    <span style={{ fontSize: 9, color: playing ? C.accent : C.sub, fontWeight: 700 }}>
-                      {playing ? '● LIVE' : '● IDLE'}
-                    </span>
+                    <span style={{ fontSize: 9, color: playing ? C.accent : C.sub, fontWeight: 700 }}>{playing ? '● LIVE' : '● IDLE'}</span>
                   </div>
 
-                  {/* Analog dial — dark chassis */}
-                  <div style={{ background: '#111', borderRadius: 12, padding: '12px 12px 8px', border: `1px solid #2a2a2a` }}>
-                    <canvas
-                      ref={el => { vuCanvasRef.current = el }}
-                      width={VU_W} height={VU_H}
-                      style={{ width: '100%', height: 'auto', display: 'block', borderRadius: 4 }}
-                    />
-                    {/* L/R legend */}
+                  <div style={{ background: '#111', borderRadius: 12, padding: '12px 12px 8px', border: '1px solid #2a2a2a' }}>
+                    <canvas ref={el => { vuCanvasRef.current = el }} width={VU_W} height={VU_H}
+                      style={{ width: '100%', height: 'auto', display: 'block', borderRadius: 4 }} />
                     <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 6 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                         <div style={{ width: 20, height: 2, background: '#111', border: '0.5px solid #888' }} />
@@ -784,7 +652,6 @@ const pkRTimer     = useRef<ReturnType<typeof setTimeout> | undefined>(undefined
                     </div>
                   </div>
 
-                  {/* VU Peak + PEAK LED */}
                   <div style={{ display: 'flex', gap: 8 }}>
                     <div style={{ flex: 1, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: '12px 14px' }}>
                       <div style={{ fontSize: 10, color: C.sub, marginBottom: 4 }}>VU Peak (합산)</div>
@@ -803,8 +670,6 @@ const pkRTimer     = useRef<ReturnType<typeof setTimeout> | undefined>(undefined
                         ↺ 리셋
                       </button>
                     </div>
-
-                    {/* PEAK LED */}
                     <div style={{ width: 64, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, flexShrink: 0 }}>
                       <div ref={el => { olLedRef.current = el }}
                         style={{ width: 16, height: 16, borderRadius: '50%', background: '#2a0000', border: '1px solid #400', transition: '.12s' }} />
@@ -813,7 +678,6 @@ const pkRTimer     = useRef<ReturnType<typeof setTimeout> | undefined>(undefined
                     </div>
                   </div>
 
-                  {/* 0 VU 기준 안내 */}
                   <div style={{ fontSize: 9, color: C.muted2, textAlign: 'center', lineHeight: 1.6 }}>
                     기준: 0 VU = {VU_REF} dBFS · 검정 바늘 L · 파란 바늘 R
                   </div>
