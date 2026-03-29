@@ -159,20 +159,19 @@ export default function Home() {
     else clearCanvas(mastCanvas.current)
   }, [files, activeIndex, isDark, masteredUrls])
 
-  // ── AudioContext 초기화 (한 번만)
-  const getAudioCtx = () => {
+  const getAudioCtx = (): AudioContext => {
     if (!audioCtxRef.current) {
       audioCtxRef.current = new ((window as any).AudioContext || (window as any).webkitAudioContext)()
     }
-    return audioCtxRef.current
+    return audioCtxRef.current as AudioContext  // ✅ null 아님을 보장
   }
 
-  // ── 분석기 연결 (audio element당 한 번만, 실패해도 재생은 유지)
   const connectAnalyzer = (audio: HTMLAudioElement, type: 'orig' | 'mast'): AnalyserNode | null => {
     const existing = type === 'orig' ? origAnalyzer.current : mastAnalyzer.current
     if (existing) return existing
     try {
       const ctx = getAudioCtx()
+      if (!ctx) return null  // ✅ TypeScript null 체크
       const an  = ctx.createAnalyser(); an.fftSize = 2048
       const src = ctx.createMediaElementSource(audio)
       src.connect(an); an.connect(ctx.destination)
@@ -180,7 +179,6 @@ export default function Home() {
       else                 mastAnalyzer.current = an
       return an
     } catch (e) {
-      // 연결 실패해도 재생은 막지 않음
       console.warn('Analyzer connect failed (playback still works):', e)
       return null
     }
@@ -189,7 +187,7 @@ export default function Home() {
   const startAnalyzing = (audio: HTMLAudioElement, type: 'orig' | 'mast') => {
     if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current)
     const an = connectAnalyzer(audio, type)
-    if (!an) return  // 분석기 없어도 재생은 이미 시작됨
+    if (!an) return
 
     const tick = () => {
       const data = new Float32Array(an.fftSize); an.getFloatTimeDomainData(data)
@@ -217,8 +215,6 @@ export default function Home() {
   const togglePlay = async (type: 'orig' | 'mast') => {
     const audio = type === 'orig' ? origAudioRef.current : mastAudioRef.current
     if (!audio) return
-
-    // AudioContext resume (브라우저 autoplay 정책)
     try {
       const ctx = getAudioCtx()
       if (ctx.state === 'suspended') await ctx.resume()
@@ -231,11 +227,7 @@ export default function Home() {
         setOrigPlaying(false)
       } else {
         mastAudioRef.current?.pause(); setMastPlaying(false)
-        try {
-          await audio.play()
-          startAnalyzing(audio, 'orig')
-          setOrigPlaying(true)
-        } catch (e) { console.error('Play failed:', e) }
+        try { await audio.play(); startAnalyzing(audio, 'orig'); setOrigPlaying(true) } catch (e) { console.error(e) }
       }
     } else {
       if (mastPlaying) {
@@ -244,11 +236,7 @@ export default function Home() {
         setMastPlaying(false)
       } else {
         origAudioRef.current?.pause(); setOrigPlaying(false)
-        try {
-          await audio.play()
-          startAnalyzing(audio, 'mast')
-          setMastPlaying(true)
-        } catch (e) { console.error('Play failed:', e) }
+        try { await audio.play(); startAnalyzing(audio, 'mast'); setMastPlaying(true) } catch (e) { console.error(e) }
       }
     }
   }
@@ -263,7 +251,6 @@ export default function Home() {
     } else { setFiles(selected) }
     setActiveIndex(0); setMasteredUrls({})
     setOrigPlaying(false); setMastPlaying(false)
-    // 트랙 교체 시 분석기 초기화 (새 audio element에 다시 연결)
     origAnalyzer.current = null; mastAnalyzer.current = null
   }
 
@@ -359,7 +346,7 @@ export default function Home() {
         const blob = await res.blob()
         setMasteredUrls(p => ({ ...p, [i]: URL.createObjectURL(blob) }))
         mastMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
-        mastAnalyzer.current = null  // 새 마스터링 결과마다 분석기 재연결
+        mastAnalyzer.current = null
         toast(`✓ ${files[i].name}`, 'success')
       } catch { toast(`처리 실패: ${files[i].name}`, 'error') }
     }
