@@ -9,7 +9,7 @@ const supabaseKey = 'sb_publishable_6dZKot10ye-Ii1OEw1d_Mg_ZFodzHjE'
 const supabase    = createClient(supabaseUrl, supabaseKey)
 const ENGINE_URL  = process.env.NEXT_PUBLIC_ENGINE_URL ?? 'https://thisismidi-thisismidi-mastering-engine.hf.space/master'
 const DEV_EMAIL   = process.env.NEXT_PUBLIC_DEV_EMAIL  ?? ''
-const MAX_MB      = 100
+const MAX_MB      = 50
 
 type ToastType = 'success' | 'error' | 'warn' | 'info'
 interface Toast { id: number; msg: string; type: ToastType }
@@ -87,7 +87,6 @@ export default function Home() {
   const isPro = tier === 'PRO' || tier === 'DEVELOPER'
   const progressPct = progress.total > 0 ? (progress.cur / progress.total) * 100 : 0
 
-  // ── 캔버스 클리어 헬퍼
   const clearCanvas = (canvas: HTMLCanvasElement | null) => {
     if (!canvas) return
     const ctx = canvas.getContext('2d')
@@ -122,7 +121,6 @@ export default function Home() {
       return () => URL.revokeObjectURL(url)
     } else {
       setCurrentOrigUrl('')
-      // 파일 없으면 캔버스 둘 다 클리어
       clearCanvas(origCanvas.current)
       clearCanvas(mastCanvas.current)
       setOrigLufs(-70); setOrigTp(-70); setMastLufs(-70); setMastTp(-70)
@@ -251,10 +249,8 @@ export default function Home() {
 
   const removeTrack = (e: React.MouseEvent, index: number) => {
     e.stopPropagation()
-    // 재생 중이면 먼저 정지
     if (origPlaying) { origAudioRef.current?.pause(); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); setOrigPlaying(false) }
     if (mastPlaying) { mastAudioRef.current?.pause(); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); setMastPlaying(false) }
-
     const newFiles = files.filter((_, i) => i !== index)
     const newUrls: Record<number, string> = {}
     Object.entries(masteredUrls).forEach(([k, v]) => {
@@ -264,11 +260,8 @@ export default function Home() {
     })
     setFiles(newFiles)
     setMasteredUrls(newUrls)
-
     if (newFiles.length === 0) {
-      // 파일 전부 삭제 → 캔버스 즉시 클리어
-      clearCanvas(origCanvas.current)
-      clearCanvas(mastCanvas.current)
+      clearCanvas(origCanvas.current); clearCanvas(mastCanvas.current)
       setActiveIndex(0)
       setOrigLufs(-70); setOrigTp(-70); setMastLufs(-70); setMastTp(-70)
       setOrigTime(0); setOrigDur(0); setMastTime(0); setMastDur(0)
