@@ -30,7 +30,6 @@ function SliderRow({ label, min, max, step, value, onChange, unit, disabled, acc
   )
 }
 
-// 파일 디코딩 기반 정적 측정 (로드 시 1회)
 async function measureFilePeak(url: string): Promise<{ lufs: number; tp: number }> {
   try {
     const buf     = await (await fetch(url)).arrayBuffer()
@@ -68,13 +67,11 @@ export default function Home() {
   const [progress, setProgress]       = useState({ cur: 0, total: 0 })
   const [currentOrigUrl, setCurrentOrigUrl] = useState('')
 
-  // LUFS / Output — 정적(로드 시) + 실시간(재생 중) 병행
   const [origLufs, setOrigLufs] = useState(-70)
   const [origTp,   setOrigTp]   = useState(-70)
   const [mastLufs, setMastLufs] = useState(-70)
   const [mastTp,   setMastTp]   = useState(-70)
 
-  // 실시간 누적 미터 ref
   const origMeter = useRef({ sum: 0, samples: 0, maxPeak: 0 })
   const mastMeter = useRef({ sum: 0, samples: 0, maxPeak: 0 })
 
@@ -140,7 +137,6 @@ export default function Home() {
     if (!isPro) { setOutFormat('MP3'); setOutSR('44100'); setOutBit('16') }
   }, [isPro])
 
-  // 원본 파일 로드 → 정적 측정
   useEffect(() => {
     if (files[activeIndex]) {
       const url = URL.createObjectURL(files[activeIndex])
@@ -157,7 +153,6 @@ export default function Home() {
     }
   }, [files, activeIndex])
 
-  // 마스터링 완료 → 정적 측정
   useEffect(() => {
     const url = masteredUrls[activeIndex]
     if (url) {
@@ -218,47 +213,28 @@ export default function Home() {
       if (type === 'orig') origAnalyzer.current = an
       else                 mastAnalyzer.current = an
       return an
-    } catch (e) {
-      console.warn('Analyzer connect failed:', e)
-      return null
-    }
+    } catch (e) { console.warn('Analyzer connect failed:', e); return null }
   }
 
-  // ✅ 실시간 미터 — 재생 중 LUFS(Integrated) + Output(Peak) 업데이트
   const startAnalyzing = (audio: HTMLAudioElement, type: 'orig' | 'mast') => {
     if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current)
     const an = connectAnalyzer(audio, type)
     if (!an) return
-
-    // 재생 시작 시 누적 초기화
     if (type === 'orig') origMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
     else                 mastMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
-
     const tick = () => {
       const data = new Float32Array(an.fftSize)
       an.getFloatTimeDomainData(data)
-
       let peak = 0, sum = 0
-      for (let i = 0; i < data.length; i++) {
-        const v = Math.abs(data[i])
-        if (v > peak) peak = v
-        sum += data[i] * data[i]
-      }
-
+      for (let i = 0; i < data.length; i++) { const v = Math.abs(data[i]); if (v > peak) peak = v; sum += data[i] * data[i] }
       const meter = type === 'orig' ? origMeter.current : mastMeter.current
-      meter.sum     += sum
-      meter.samples += data.length
+      meter.sum += sum; meter.samples += data.length
       if (peak > meter.maxPeak) meter.maxPeak = peak
-
-      // Integrated LUFS (누적 RMS 기반 근사값)
       const rms  = Math.sqrt(meter.sum / meter.samples)
       const lufs = rms > 0 ? Math.round((20 * Math.log10(rms) - 0.691) * 10) / 10 : -70
-      // Output Peak (재생 중 최대 샘플 피크)
       const tp   = meter.maxPeak > 0 ? Math.round(20 * Math.log10(meter.maxPeak) * 10) / 10 : -70
-
       if (type === 'orig') { setOrigLufs(lufs); setOrigTp(tp) }
       else                 { setMastLufs(lufs); setMastTp(tp) }
-
       rafIdRef.current = requestAnimationFrame(tick)
     }
     tick()
@@ -267,11 +243,9 @@ export default function Home() {
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>, ref: React.RefObject<HTMLAudioElement | null>, dur: number, type: 'orig' | 'mast') => {
     if (!ref?.current || !dur) return
     ref.current.currentTime = (e.nativeEvent.offsetX / e.currentTarget.getBoundingClientRect().width) * dur
-    // 탐색 시 누적 리셋 → 정적 측정값 복원
     if (type === 'orig') {
       origMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
-      const url = currentOrigUrl
-      if (url) measureFilePeak(url).then(({ lufs, tp }) => { setOrigLufs(lufs); setOrigTp(tp) })
+      if (currentOrigUrl) measureFilePeak(currentOrigUrl).then(({ lufs, tp }) => { setOrigLufs(lufs); setOrigTp(tp) })
     } else {
       mastMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
       const url = masteredUrls[activeIndex]
@@ -282,17 +256,10 @@ export default function Home() {
   const togglePlay = async (type: 'orig' | 'mast') => {
     const audio = type === 'orig' ? origAudioRef.current : mastAudioRef.current
     if (!audio) return
-    try {
-      const ctx = getAudioCtx()
-      if (ctx.state === 'suspended') await ctx.resume()
-    } catch {}
-
+    try { const ctx = getAudioCtx(); if (ctx.state === 'suspended') await ctx.resume() } catch {}
     if (type === 'orig') {
       if (origPlaying) {
-        audio.pause()
-        if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current)
-        setOrigPlaying(false)
-        // 정지 시 정적 측정값 복원
+        audio.pause(); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); setOrigPlaying(false)
         measureFilePeak(currentOrigUrl).then(({ lufs, tp }) => { setOrigLufs(lufs); setOrigTp(tp) })
       } else {
         mastAudioRef.current?.pause(); setMastPlaying(false)
@@ -300,9 +267,7 @@ export default function Home() {
       }
     } else {
       if (mastPlaying) {
-        audio.pause()
-        if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current)
-        setMastPlaying(false)
+        audio.pause(); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); setMastPlaying(false)
         const url = masteredUrls[activeIndex]
         if (url) measureFilePeak(url).then(({ lufs, tp }) => { setMastLufs(lufs); setMastTp(tp) })
       } else {
@@ -362,6 +327,15 @@ export default function Home() {
       setOrigTime(0); setOrigDur(0); setMastTime(0); setMastDur(0)
     } else { setActiveIndex(Math.min(activeIndex, newFiles.length - 1)) }
     toast('트랙 삭제됨', 'info')
+  }
+
+  // ── 디폴트 리셋
+  const resetToDefault = () => {
+    setTargetLufs('-14.0'); setTruePeak('-1.0')
+    setPresence('0'); setWarmth('0'); setTreble('0')
+    setStereoWidth('100'); setSpaceDepth('0')
+    setMonoBass('0'); setGlueComp('0')
+    toast('기본값으로 초기화됐어요.', 'info')
   }
 
   const applyPreset = (genre: string) => {
@@ -554,8 +528,6 @@ export default function Home() {
                 <h3>A / B Monitor</h3>
                 <span>{files[activeIndex]?.name || '—'}</span>
               </div>
-
-              {/* Original */}
               <div className="mon-row">
                 <div className="mon-ctrl">
                   <p className="mon-label orig-lbl">Original</p>
@@ -589,8 +561,6 @@ export default function Home() {
                     measureFilePeak(currentOrigUrl).then(({ lufs, tp }) => { setOrigLufs(lufs); setOrigTp(tp) })
                   }} />
               </div>
-
-              {/* Mastered */}
               <div className="mon-row" style={{ marginTop: 20 }}>
                 <div className="mon-ctrl">
                   <p className="mon-label mast-lbl">Mastered</p>
@@ -631,10 +601,17 @@ export default function Home() {
               </div>
             </section>
 
+            {/* ── Mastering Presets ── */}
             <section className="panel">
               <div className="panel-top">
                 <h3>Mastering Presets</h3>
-                {!isPro && <span className="lock">PRO ONLY 🔒</span>}
+                <div className="preset-top-right">
+                  {!isPro && <span className="lock">PRO ONLY 🔒</span>}
+                  {/* ✅ Default 리셋 버튼 */}
+                  <button className="btn-default" onClick={resetToDefault} title="모든 파라미터를 기본값으로 초기화">
+                    ↺ Default
+                  </button>
+                </div>
               </div>
               <div className="preset-grid">
                 {[
@@ -744,6 +721,10 @@ export default function Home() {
         .panel-top h3 { font-size: .78rem; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: var(--txt); }
         .panel-top span { font-size: .72rem; color: var(--txt2); }
         .lock { font-size: .65rem; background: var(--sur2); border: 1px solid var(--brd); padding: 2px 8px; border-radius: 50px; color: var(--txt2); }
+        /* ✅ Default 버튼 + 우측 그룹 */
+        .preset-top-right { display: flex; align-items: center; gap: 8px; }
+        .btn-default { background: none; border: 1px solid var(--brd); color: var(--txt2); padding: 3px 10px; border-radius: 50px; font-size: .65rem; font-weight: 700; cursor: pointer; letter-spacing: .3px; transition: .15s; }
+        .btn-default:hover { border-color: var(--acc); color: var(--acc); background: var(--acc-bg); }
         .drop-zone  { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 88px; border: 1px dashed var(--brd); border-radius: 8px; cursor: pointer; transition: .2s; background: var(--sur2); padding: 20px; }
         .drop-zone:hover { border-color: var(--acc); background: var(--acc-bg); }
         .drop-zone.drag-over { border-color: var(--acc); background: var(--acc-bg); border-style: solid; transform: scale(1.01); }
