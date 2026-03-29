@@ -14,6 +14,7 @@ const MAX_MB      = 50
 type ToastType = 'success' | 'error' | 'warn' | 'info'
 interface Toast { id: number; msg: string; type: ToastType }
 type EngineStatus = 'idle' | 'warming' | 'running'
+type ActiveTab = 'mastering' | 'mixing'
 
 function SliderRow({ label, min, max, step, value, onChange, unit, disabled, accent }: {
   label: string; min: number; max: number; step: number
@@ -40,10 +41,8 @@ async function measureFilePeak(url: string): Promise<{ lufs: number; tp: number 
     for (let ch = 0; ch < decoded.numberOfChannels; ch++) {
       const data = decoded.getChannelData(ch)
       for (let i = 0; i < data.length; i++) {
-        const v = Math.abs(data[i])
-        if (v > peak) peak = v
-        sumSq += data[i] * data[i]
-        total++
+        const v = Math.abs(data[i]); if (v > peak) peak = v
+        sumSq += data[i] * data[i]; total++
       }
     }
     const tp   = peak > 0 ? Math.round(20 * Math.log10(peak) * 10) / 10 : -70
@@ -58,6 +57,7 @@ export default function Home() {
   const [tier, setTier]               = useState('FREE')
   const [isDark, setIsDark]           = useState(true)
   const [isDragOver, setIsDragOver]   = useState(false)
+  const [activeTab, setActiveTab]     = useState<ActiveTab>('mastering')
 
   const [files, setFiles]             = useState<File[]>([])
   const [masteredUrls, setMasteredUrls] = useState<Record<number, string>>({})
@@ -67,11 +67,8 @@ export default function Home() {
   const [progress, setProgress]       = useState({ cur: 0, total: 0 })
   const [currentOrigUrl, setCurrentOrigUrl] = useState('')
 
-  const [origLufs, setOrigLufs] = useState(-70)
-  const [origTp,   setOrigTp]   = useState(-70)
-  const [mastLufs, setMastLufs] = useState(-70)
-  const [mastTp,   setMastTp]   = useState(-70)
-
+  const [origLufs, setOrigLufs] = useState(-70); const [origTp, setOrigTp] = useState(-70)
+  const [mastLufs, setMastLufs] = useState(-70); const [mastTp, setMastTp] = useState(-70)
   const origMeter = useRef({ sum: 0, samples: 0, maxPeak: 0 })
   const mastMeter = useRef({ sum: 0, samples: 0, maxPeak: 0 })
 
@@ -120,7 +117,7 @@ export default function Home() {
   }
 
   useEffect(() => {
-    document.title = 'THISISMIDI Mastering AI'
+    document.title = 'THISISMIDI'
     supabase.auth.getSession().then(({ data: { session } }) => handleUser(session?.user ?? null))
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, s) => handleUser(s?.user ?? null))
     return () => subscription.unsubscribe()
@@ -159,36 +156,27 @@ export default function Home() {
       setMastLufs(-70); setMastTp(-70)
       mastMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
       measureFilePeak(url).then(({ lufs, tp }) => { setMastLufs(lufs); setMastTp(tp) })
-    } else {
-      setMastLufs(-70); setMastTp(-70)
-    }
+    } else { setMastLufs(-70); setMastTp(-70) }
   }, [masteredUrls, activeIndex])
 
   const drawWave = async (src: File | string, canvas: HTMLCanvasElement, color: string) => {
     const ctx = canvas.getContext('2d'); if (!ctx) return
     try {
-      const buf = typeof src === 'string'
-        ? await (await fetch(src)).arrayBuffer()
-        : await src.arrayBuffer()
-      const tCtx  = new AudioContext()
-      const audio = await tCtx.decodeAudioData(buf)
-      const data  = audio.getChannelData(0)
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-      ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = 1.2
+      const buf = typeof src === 'string' ? await (await fetch(src)).arrayBuffer() : await src.arrayBuffer()
+      const tCtx = new AudioContext(); const audio = await tCtx.decodeAudioData(buf); const data = audio.getChannelData(0)
+      ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = 1.2
       const step = Math.floor(data.length / canvas.width)
       for (let i = 0; i < canvas.width; i++) {
         let min = 1, max = -1
         for (let j = 0; j < step; j++) { const v = data[i * step + j]; if (v < min) min = v; if (v > max) max = v }
-        ctx.moveTo(i, (1 + min) * canvas.height / 2)
-        ctx.lineTo(i, (1 + max) * canvas.height / 2)
+        ctx.moveTo(i, (1 + min) * canvas.height / 2); ctx.lineTo(i, (1 + max) * canvas.height / 2)
       }
       ctx.stroke(); await tCtx.close()
     } catch (e) { console.error(e) }
   }
 
   useEffect(() => {
-    const origColor = isDark ? '#4ade80' : '#16a34a'
-    const mastColor = isDark ? '#60a5fa' : '#2563eb'
+    const origColor = isDark ? '#4ade80' : '#16a34a'; const mastColor = isDark ? '#60a5fa' : '#2563eb'
     if (files[activeIndex] && origCanvas.current) drawWave(files[activeIndex], origCanvas.current, origColor)
     else clearCanvas(origCanvas.current)
     if (masteredUrls[activeIndex] && mastCanvas.current) drawWave(masteredUrls[activeIndex], mastCanvas.current, mastColor)
@@ -196,8 +184,7 @@ export default function Home() {
   }, [files, activeIndex, isDark, masteredUrls])
 
   const getAudioCtx = (): AudioContext => {
-    if (!audioCtxRef.current)
-      audioCtxRef.current = new ((window as any).AudioContext || (window as any).webkitAudioContext)()
+    if (!audioCtxRef.current) audioCtxRef.current = new ((window as any).AudioContext || (window as any).webkitAudioContext)()
     return audioCtxRef.current as AudioContext
   }
 
@@ -205,36 +192,30 @@ export default function Home() {
     const existing = type === 'orig' ? origAnalyzer.current : mastAnalyzer.current
     if (existing) return existing
     try {
-      const ctx = getAudioCtx()
-      if (!ctx) return null
-      const an  = ctx.createAnalyser(); an.fftSize = 2048
+      const ctx = getAudioCtx(); if (!ctx) return null
+      const an = ctx.createAnalyser(); an.fftSize = 2048
       const src = ctx.createMediaElementSource(audio)
       src.connect(an); an.connect(ctx.destination)
-      if (type === 'orig') origAnalyzer.current = an
-      else                 mastAnalyzer.current = an
+      if (type === 'orig') origAnalyzer.current = an; else mastAnalyzer.current = an
       return an
     } catch (e) { console.warn('Analyzer connect failed:', e); return null }
   }
 
   const startAnalyzing = (audio: HTMLAudioElement, type: 'orig' | 'mast') => {
     if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current)
-    const an = connectAnalyzer(audio, type)
-    if (!an) return
+    const an = connectAnalyzer(audio, type); if (!an) return
     if (type === 'orig') origMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
     else                 mastMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
     const tick = () => {
-      const data = new Float32Array(an.fftSize)
-      an.getFloatTimeDomainData(data)
+      const data = new Float32Array(an.fftSize); an.getFloatTimeDomainData(data)
       let peak = 0, sum = 0
       for (let i = 0; i < data.length; i++) { const v = Math.abs(data[i]); if (v > peak) peak = v; sum += data[i] * data[i] }
       const meter = type === 'orig' ? origMeter.current : mastMeter.current
-      meter.sum += sum; meter.samples += data.length
-      if (peak > meter.maxPeak) meter.maxPeak = peak
-      const rms  = Math.sqrt(meter.sum / meter.samples)
+      meter.sum += sum; meter.samples += data.length; if (peak > meter.maxPeak) meter.maxPeak = peak
+      const rms = Math.sqrt(meter.sum / meter.samples)
       const lufs = rms > 0 ? Math.round((20 * Math.log10(rms) - 0.691) * 10) / 10 : -70
       const tp   = meter.maxPeak > 0 ? Math.round(20 * Math.log10(meter.maxPeak) * 10) / 10 : -70
-      if (type === 'orig') { setOrigLufs(lufs); setOrigTp(tp) }
-      else                 { setMastLufs(lufs); setMastTp(tp) }
+      if (type === 'orig') { setOrigLufs(lufs); setOrigTp(tp) } else { setMastLufs(lufs); setMastTp(tp) }
       rafIdRef.current = requestAnimationFrame(tick)
     }
     tick()
@@ -243,63 +224,36 @@ export default function Home() {
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>, ref: React.RefObject<HTMLAudioElement | null>, dur: number, type: 'orig' | 'mast') => {
     if (!ref?.current || !dur) return
     ref.current.currentTime = (e.nativeEvent.offsetX / e.currentTarget.getBoundingClientRect().width) * dur
-    if (type === 'orig') {
-      origMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
-      if (currentOrigUrl) measureFilePeak(currentOrigUrl).then(({ lufs, tp }) => { setOrigLufs(lufs); setOrigTp(tp) })
-    } else {
-      mastMeter.current = { sum: 0, samples: 0, maxPeak: 0 }
-      const url = masteredUrls[activeIndex]
-      if (url) measureFilePeak(url).then(({ lufs, tp }) => { setMastLufs(lufs); setMastTp(tp) })
-    }
+    if (type === 'orig') { origMeter.current = { sum: 0, samples: 0, maxPeak: 0 }; if (currentOrigUrl) measureFilePeak(currentOrigUrl).then(({ lufs, tp }) => { setOrigLufs(lufs); setOrigTp(tp) }) }
+    else { mastMeter.current = { sum: 0, samples: 0, maxPeak: 0 }; const url = masteredUrls[activeIndex]; if (url) measureFilePeak(url).then(({ lufs, tp }) => { setMastLufs(lufs); setMastTp(tp) }) }
   }
 
   const togglePlay = async (type: 'orig' | 'mast') => {
-    const audio = type === 'orig' ? origAudioRef.current : mastAudioRef.current
-    if (!audio) return
+    const audio = type === 'orig' ? origAudioRef.current : mastAudioRef.current; if (!audio) return
     try { const ctx = getAudioCtx(); if (ctx.state === 'suspended') await ctx.resume() } catch {}
     if (type === 'orig') {
-      if (origPlaying) {
-        audio.pause(); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); setOrigPlaying(false)
-        measureFilePeak(currentOrigUrl).then(({ lufs, tp }) => { setOrigLufs(lufs); setOrigTp(tp) })
-      } else {
-        mastAudioRef.current?.pause(); setMastPlaying(false)
-        try { await audio.play(); startAnalyzing(audio, 'orig'); setOrigPlaying(true) } catch (e) { console.error(e) }
-      }
+      if (origPlaying) { audio.pause(); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); setOrigPlaying(false); measureFilePeak(currentOrigUrl).then(({ lufs, tp }) => { setOrigLufs(lufs); setOrigTp(tp) }) }
+      else { mastAudioRef.current?.pause(); setMastPlaying(false); try { await audio.play(); startAnalyzing(audio, 'orig'); setOrigPlaying(true) } catch (e) { console.error(e) } }
     } else {
-      if (mastPlaying) {
-        audio.pause(); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); setMastPlaying(false)
-        const url = masteredUrls[activeIndex]
-        if (url) measureFilePeak(url).then(({ lufs, tp }) => { setMastLufs(lufs); setMastTp(tp) })
-      } else {
-        origAudioRef.current?.pause(); setOrigPlaying(false)
-        try { await audio.play(); startAnalyzing(audio, 'mast'); setMastPlaying(true) } catch (e) { console.error(e) }
-      }
+      if (mastPlaying) { audio.pause(); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); setMastPlaying(false); const url = masteredUrls[activeIndex]; if (url) measureFilePeak(url).then(({ lufs, tp }) => { setMastLufs(lufs); setMastTp(tp) }) }
+      else { origAudioRef.current?.pause(); setOrigPlaying(false); try { await audio.play(); startAnalyzing(audio, 'mast'); setMastPlaying(true) } catch (e) { console.error(e) } }
     }
   }
 
   const processFiles = (selected: File[]) => {
-    const limit    = isPro ? 15 : 1
+    const limit = isPro ? 15 : 1
     const oversize = selected.filter(f => f.size > MAX_MB * 1024 * 1024)
     if (oversize.length > 0) { toast(`파일이 너무 큽니다. 최대 ${MAX_MB}MB (${oversize[0].name})`, 'error'); return }
-    if (selected.length > limit) {
-      toast(isPro ? '최대 15곡까지 처리 가능합니다.' : '무료 버전은 1곡만 가능합니다. PRO로 업그레이드하세요.', 'warn')
-      setFiles(selected.slice(0, limit))
-    } else { setFiles(selected) }
-    setActiveIndex(0); setMasteredUrls({})
-    setOrigPlaying(false); setMastPlaying(false)
+    if (selected.length > limit) { toast(isPro ? '최대 15곡까지 처리 가능합니다.' : '무료 버전은 1곡만 가능합니다.', 'warn'); setFiles(selected.slice(0, limit)) }
+    else { setFiles(selected) }
+    setActiveIndex(0); setMasteredUrls({}); setOrigPlaying(false); setMastPlaying(false)
     origAnalyzer.current = null; mastAnalyzer.current = null
   }
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    processFiles(Array.from(e.target.files || []))
-  }
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => processFiles(Array.from(e.target.files || []))
 
-  const handleDragOver = (e: React.DragEvent<HTMLLabelElement>) => {
-    e.preventDefault(); e.stopPropagation(); setIsDragOver(true)
-  }
-  const handleDragLeave = (e: React.DragEvent<HTMLLabelElement>) => {
-    e.preventDefault(); setIsDragOver(false)
-  }
+  const handleDragOver = (e: React.DragEvent<HTMLLabelElement>) => { e.preventDefault(); e.stopPropagation(); setIsDragOver(true) }
+  const handleDragLeave = (e: React.DragEvent<HTMLLabelElement>) => { e.preventDefault(); setIsDragOver(false) }
   const handleDrop = (e: React.DragEvent<HTMLLabelElement>) => {
     e.preventDefault(); e.stopPropagation(); setIsDragOver(false)
     const dropped = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('audio/'))
@@ -313,28 +267,16 @@ export default function Home() {
     if (mastPlaying) { mastAudioRef.current?.pause(); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); setMastPlaying(false) }
     const newFiles = files.filter((_, i) => i !== index)
     const newUrls: Record<number, string> = {}
-    Object.entries(masteredUrls).forEach(([k, v]) => {
-      const ki = Number(k)
-      if (ki < index) newUrls[ki] = v
-      else if (ki > index) newUrls[ki - 1] = v
-    })
-    setFiles(newFiles); setMasteredUrls(newUrls)
-    origAnalyzer.current = null; mastAnalyzer.current = null
-    if (newFiles.length === 0) {
-      clearCanvas(origCanvas.current); clearCanvas(mastCanvas.current)
-      setActiveIndex(0)
-      setOrigLufs(-70); setOrigTp(-70); setMastLufs(-70); setMastTp(-70)
-      setOrigTime(0); setOrigDur(0); setMastTime(0); setMastDur(0)
-    } else { setActiveIndex(Math.min(activeIndex, newFiles.length - 1)) }
+    Object.entries(masteredUrls).forEach(([k, v]) => { const ki = Number(k); if (ki < index) newUrls[ki] = v; else if (ki > index) newUrls[ki - 1] = v })
+    setFiles(newFiles); setMasteredUrls(newUrls); origAnalyzer.current = null; mastAnalyzer.current = null
+    if (newFiles.length === 0) { clearCanvas(origCanvas.current); clearCanvas(mastCanvas.current); setActiveIndex(0); setOrigLufs(-70); setOrigTp(-70); setMastLufs(-70); setMastTp(-70); setOrigTime(0); setOrigDur(0); setMastTime(0); setMastDur(0) }
+    else { setActiveIndex(Math.min(activeIndex, newFiles.length - 1)) }
     toast('트랙 삭제됨', 'info')
   }
 
-  // ── 디폴트 리셋
   const resetToDefault = () => {
-    setTargetLufs('-14.0'); setTruePeak('-1.0')
-    setPresence('0'); setWarmth('0'); setTreble('0')
-    setStereoWidth('100'); setSpaceDepth('0')
-    setMonoBass('0'); setGlueComp('0')
+    setTargetLufs('-14.0'); setTruePeak('-1.0'); setPresence('0'); setWarmth('0'); setTreble('0')
+    setStereoWidth('100'); setSpaceDepth('0'); setMonoBass('0'); setGlueComp('0')
     toast('기본값으로 초기화됐어요.', 'info')
   }
 
@@ -354,15 +296,10 @@ export default function Home() {
   }
 
   const wakeUpEngine = async (): Promise<void> => {
-    setEngineStatus('warming')
-    toast('AI 엔진 연결 중... 처음 시작 시 최대 30초 소요될 수 있어요.', 'info')
-    const healthUrl = ENGINE_URL.replace('/master', '/')
-    const deadline  = Date.now() + 35_000
+    setEngineStatus('warming'); toast('AI 엔진 연결 중... 처음 시작 시 최대 30초 소요될 수 있어요.', 'info')
+    const healthUrl = ENGINE_URL.replace('/master', '/'); const deadline = Date.now() + 35_000
     while (Date.now() < deadline) {
-      try {
-        const res = await fetch(healthUrl, { signal: AbortSignal.timeout(8000) })
-        if (res.ok || res.status === 405) break
-      } catch {}
+      try { const res = await fetch(healthUrl, { signal: AbortSignal.timeout(8000) }); if (res.ok || res.status === 405) break } catch {}
       await new Promise(r => setTimeout(r, 3000))
     }
     setEngineStatus('running')
@@ -371,27 +308,19 @@ export default function Home() {
   const runBatchMastering = async () => {
     if (files.length === 0) return
     setIsProcessing(true); setProgress({ cur: 0, total: files.length })
-    try {
-      const res = await fetch(ENGINE_URL.replace('/master', '/'), { signal: AbortSignal.timeout(4000) })
-      if (!res.ok && res.status !== 405) throw new Error('cold')
-      setEngineStatus('running')
-    } catch { await wakeUpEngine() }
+    try { const res = await fetch(ENGINE_URL.replace('/master', '/'), { signal: AbortSignal.timeout(4000) }); if (!res.ok && res.status !== 405) throw new Error('cold'); setEngineStatus('running') }
+    catch { await wakeUpEngine() }
     for (let i = 0; i < files.length; i++) {
       setActiveIndex(i); setProgress({ cur: i + 1, total: files.length })
       const fd = new FormData()
-      fd.append('file', files[i])
-      fd.append('out_format', outFormat); fd.append('out_sample_rate', outSR); fd.append('out_bit_depth', outBit)
-      fd.append('target_lufs', targetLufs); fd.append('true_peak', truePeak)
-      fd.append('presence', presence); fd.append('warmth', warmth); fd.append('treble', treble)
-      fd.append('stereo_width', stereoWidth); fd.append('space_depth', spaceDepth)
-      fd.append('mono_bass', monoBass); fd.append('glue_comp', glueComp)
+      fd.append('file', files[i]); fd.append('out_format', outFormat); fd.append('out_sample_rate', outSR); fd.append('out_bit_depth', outBit)
+      fd.append('target_lufs', targetLufs); fd.append('true_peak', truePeak); fd.append('presence', presence)
+      fd.append('warmth', warmth); fd.append('treble', treble); fd.append('stereo_width', stereoWidth)
+      fd.append('space_depth', spaceDepth); fd.append('mono_bass', monoBass); fd.append('glue_comp', glueComp)
       try {
-        const res = await fetch(ENGINE_URL, { method: 'POST', body: fd })
-        if (!res.ok) throw new Error('engine error')
-        const blob = await res.blob()
-        const url  = URL.createObjectURL(blob)
-        setMasteredUrls(p => ({ ...p, [i]: url }))
-        mastAnalyzer.current = null
+        const res = await fetch(ENGINE_URL, { method: 'POST', body: fd }); if (!res.ok) throw new Error('engine error')
+        const blob = await res.blob(); const url = URL.createObjectURL(blob)
+        setMasteredUrls(p => ({ ...p, [i]: url })); mastAnalyzer.current = null
         toast(`✓ ${files[i].name}`, 'success')
       } catch { toast(`처리 실패: ${files[i].name}`, 'error') }
     }
@@ -401,11 +330,9 @@ export default function Home() {
 
   const downloadZip = async () => {
     const keys = Object.keys(masteredUrls); if (keys.length === 0) return
-    toast('ZIP 압축 중...', 'info')
-    const zip = new JSZip()
+    toast('ZIP 압축 중...', 'info'); const zip = new JSZip()
     for (const key of keys) {
-      const i    = Number(key)
-      const name = files[i].name.split('.').slice(0, -1).join('.') + `_Mastered.${outFormat.toLowerCase()}`
+      const i = Number(key); const name = files[i].name.split('.').slice(0, -1).join('.') + `_Mastered.${outFormat.toLowerCase()}`
       try { const blob = await (await fetch(masteredUrls[i])).blob(); zip.file(name, blob) } catch {}
     }
     const content = await zip.generateAsync({ type: 'blob' })
@@ -433,12 +360,11 @@ export default function Home() {
   return (
     <main className={isDark ? 'dark' : 'light'}>
       <div className="toast-wrap">
-        {toasts.map(t => (
-          <div key={t.id} className={`toast toast-${t.type}`}>{t.msg}</div>
-        ))}
+        {toasts.map(t => <div key={t.id} className={`toast toast-${t.type}`}>{t.msg}</div>)}
       </div>
 
       <div className="ws">
+        {/* ── 글로벌 헤더 ── */}
         <header className="hd">
           <div className="brand">THISISMIDI <span className="acc">.</span></div>
           <div className="hd-right">
@@ -446,368 +372,339 @@ export default function Home() {
             {engineStatus === 'warming' && <span className="eng-chip warm">⚡ WARMING</span>}
             {engineStatus === 'running' && <span className="eng-chip run">● LIVE</span>}
             <button className="btn-sm" onClick={() => setIsDark(d => !d)}>{isDark ? '☀ LIGHT' : '☾ DARK'}</button>
-            {user
-              ? <button className="btn-sm" onClick={() => supabase.auth.signOut()}>LOGOUT</button>
-              : <button className="btn-sm" onClick={() => supabase.auth.signInWithOAuth({ provider: 'google' })}>LOGIN</button>
-            }
+            {user ? <button className="btn-sm" onClick={() => supabase.auth.signOut()}>LOGOUT</button>
+                  : <button className="btn-sm" onClick={() => supabase.auth.signInWithOAuth({ provider: 'google' })}>LOGIN</button>}
           </div>
         </header>
 
+        {/* ── 탭 네비게이션 ── */}
+        <nav className="tab-nav">
+          <button className={`tab-btn${activeTab === 'mastering' ? ' active' : ''}`} onClick={() => setActiveTab('mastering')}>
+            <span className="tab-icon">🎛</span> AI Mastering
+          </button>
+          <button className={`tab-btn${activeTab === 'mixing' ? ' active' : ''}`} onClick={() => setActiveTab('mixing')}>
+            <span className="tab-icon">🎚</span> AI Mixing
+            <span className="tab-soon">SOON</span>
+          </button>
+        </nav>
+
+        {/* ── 로그인 히어로 ── */}
         {!user ? (
           <div className="hero">
-            <p className="hero-eyebrow">Professional AI Audio Mastering</p>
-            <h1 className="hero-title">Mastering,<br />Simplified.</h1>
+            <p className="hero-eyebrow">Professional AI Music Tools</p>
+            <h1 className="hero-title">Sound Better,<br />Instantly.</h1>
             <button className="btn-prime" onClick={() => supabase.auth.signInWithOAuth({ provider: 'google' })}>
               Start with Google →
             </button>
           </div>
         ) : (
-          <div className="layout">
+          <>
+            {/* ══════════════ AI MASTERING TAB ══════════════ */}
+            {activeTab === 'mastering' && (
+              <div className="layout">
 
-            <section className="panel">
-              <div className="panel-top">
-                <h3>Track Queue</h3>
-                <span>{files.length} / {isPro ? 15 : 1} tracks</span>
+                <section className="panel">
+                  <div className="panel-top">
+                    <h3>Track Queue</h3>
+                    <span>{files.length} / {isPro ? 15 : 1} tracks</span>
+                  </div>
+                  <input type="file" id="u-file" hidden multiple onChange={handleFileUpload} accept="audio/*" />
+                  <label htmlFor="u-file" className={`drop-zone${isDragOver ? ' drag-over' : ''}`}
+                    onDragOver={handleDragOver} onDragEnter={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
+                    <span className="drop-icon">{isDragOver ? '📂' : '🎵'}</span>
+                    <span className="drop-main">{isDragOver ? '여기에 놓으세요!' : 'Drop audio files here or click to browse'}</span>
+                    <span className="drop-sub">MP3 · WAV · FLAC · AIFF &nbsp;|&nbsp; Max {MAX_MB}MB per file</span>
+                  </label>
+                  <div className="action-row">
+                    <label htmlFor="u-file" className="btn-sec">UPLOAD</label>
+                    <button className="btn-prime" onClick={runBatchMastering} disabled={isProcessing || files.length === 0}>{btnLabel()}</button>
+                  </div>
+                  {engineStatus === 'warming' && <div className="cold-notice"><span className="spin" />AI 엔진을 깨우는 중입니다. 처음 실행 시 최대 30초 소요될 수 있어요.</div>}
+                  {isProcessing && progress.total > 0 && (
+                    <div className="prog-track"><div className="prog-bar" style={{ width: `${progressPct}%` }} /><span className="prog-label">{Math.round(progressPct)}%</span></div>
+                  )}
+                  {Object.keys(masteredUrls).length > 1 && <button className="btn-zip" onClick={downloadZip}>📥 DOWNLOAD ALL AS ZIP</button>}
+                  <ul className="track-list">
+                    {files.map((f, i) => (
+                      <li key={i} className={`track-item${activeIndex === i ? ' active' : ''}`}
+                        onClick={() => { setActiveIndex(i); setOrigPlaying(false); setMastPlaying(false); origAnalyzer.current = null; mastAnalyzer.current = null }}>
+                        <span className="t-num">{String(i + 1).padStart(2, '0')}</span>
+                        <span className="t-name">{f.name}</span>
+                        {isProcessing && progress.cur === i + 1 && engineStatus === 'running' && <span className="t-badge proc">◎</span>}
+                        {masteredUrls[i] && <span className="t-badge done">✓</span>}
+                        {!isProcessing && <button className="t-remove" onClick={e => removeTrack(e, i)} title="트랙 삭제">✕</button>}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+
+                <section className="panel">
+                  <div className="panel-top"><h3>A / B Monitor</h3><span>{files[activeIndex]?.name || '—'}</span></div>
+                  <div className="mon-row">
+                    <div className="mon-ctrl">
+                      <p className="mon-label orig-lbl">Original</p>
+                      <div className="meter-box">
+                        <div className="meter-row"><span>Integrated</span><span className="mval">{origLufs} <span className="munit">LUFS</span></span></div>
+                        <div className="meter-row"><span>Output</span><span className="mval">{origTp} <span className="munit">dBFS</span></span></div>
+                      </div>
+                      <button className="btn-play" onClick={() => togglePlay('orig')}>{origPlaying ? '■ STOP' : '▶ PLAY'}</button>
+                    </div>
+                    <div className="mon-wave">
+                      <div className="time-row">{fmt(origTime)} / {fmt(origDur)}</div>
+                      <div className="wave-box" onClick={e => handleSeek(e, origAudioRef, origDur, 'orig')}>
+                        <canvas ref={origCanvas} width={1000} height={140} />
+                        <div className="seeker sk-orig" style={{ left: origDur > 0 ? `${(origTime / origDur) * 100}%` : '0' }} />
+                      </div>
+                    </div>
+                    <audio ref={origAudioRef} src={currentOrigUrl}
+                      onTimeUpdate={e => setOrigTime(e.currentTarget.currentTime)}
+                      onLoadedMetadata={e => setOrigDur(e.currentTarget.duration)}
+                      onEnded={() => { setOrigPlaying(false); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); measureFilePeak(currentOrigUrl).then(({ lufs, tp }) => { setOrigLufs(lufs); setOrigTp(tp) }) }} />
+                  </div>
+                  <div className="mon-row" style={{ marginTop: 20 }}>
+                    <div className="mon-ctrl">
+                      <p className="mon-label mast-lbl">Mastered</p>
+                      <div className="meter-box">
+                        <div className="meter-row"><span>Integrated</span><span className="mval pro">{mastLufs} <span className="munit">LUFS</span></span></div>
+                        <div className="meter-row"><span>Output</span><span className="mval pro">{mastTp} <span className="munit">dBFS</span></span></div>
+                      </div>
+                      <button className="btn-play" onClick={() => togglePlay('mast')} disabled={!masteredUrls[activeIndex]}>{mastPlaying ? '■ STOP' : '▶ PLAY'}</button>
+                      {masteredUrls[activeIndex] && <a className="btn-dl" href={masteredUrls[activeIndex]} download={getDownloadName()}>↓ DOWNLOAD</a>}
+                    </div>
+                    <div className="mon-wave">
+                      <div className="time-row">{fmt(mastTime)} / {fmt(mastDur)}</div>
+                      <div className="wave-box" onClick={e => handleSeek(e, mastAudioRef, mastDur, 'mast')}>
+                        <canvas ref={mastCanvas} width={1000} height={140} />
+                        <div className="seeker sk-mast" style={{ left: mastDur > 0 ? `${(mastTime / mastDur) * 100}%` : '0' }} />
+                        {!masteredUrls[activeIndex] && <div className="no-file">No mastered file yet</div>}
+                      </div>
+                    </div>
+                    <audio ref={mastAudioRef} src={masteredUrls[activeIndex] || ''}
+                      onTimeUpdate={e => setMastTime(e.currentTarget.currentTime)}
+                      onLoadedMetadata={e => setMastDur(e.currentTarget.duration)}
+                      onEnded={() => { setMastPlaying(false); if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); const url = masteredUrls[activeIndex]; if (url) measureFilePeak(url).then(({ lufs, tp }) => { setMastLufs(lufs); setMastTp(tp) }) }} />
+                  </div>
+                </section>
+
+                <section className="panel">
+                  <div className="panel-top">
+                    <h3>Mastering Presets</h3>
+                    <div className="preset-top-right">
+                      {!isPro && <span className="lock">PRO ONLY 🔒</span>}
+                      <button className="btn-default" onClick={resetToDefault}>↺ Default</button>
+                    </div>
+                  </div>
+                  <div className="preset-grid">
+                    {[{ key: 'Hiphop', icon: '🎤', label: 'Hiphop' }, { key: 'Electronic', icon: '⚡', label: 'Electronic' }, { key: 'RnB', icon: '🎸', label: 'R&B' }, { key: 'Film', icon: '🎬', label: 'Film Music' }, { key: 'Ambient', icon: '🌊', label: 'Ambient' }]
+                      .map(({ key, icon, label }) => (
+                        <button key={key} className="btn-preset" onClick={() => applyPreset(key)} disabled={!isPro}>
+                          <span className="p-icon">{icon}</span><span>{label}</span>
+                        </button>
+                      ))}
+                  </div>
+                </section>
+
+                <section className="panel">
+                  <div className="panel-top"><h3>Mastering Controls</h3>{!isPro && <span className="lock">PRO ONLY 🔒</span>}</div>
+                  <div className="ctrl-grid">
+                    <div className="ctrl-group">
+                      <p className="g-title">Output Format</p>
+                      <div className="sel-row"><label>Format</label>
+                        <select className="sel" value={outFormat} onChange={e => setOutFormat(e.target.value)} disabled={!isPro}>
+                          <option value="MP3">MP3</option>{isPro && <><option value="WAV">WAV</option><option value="FLAC">FLAC</option></>}
+                        </select></div>
+                      <div className="sel-row"><label>Sample Rate</label>
+                        <select className="sel" value={outSR} onChange={e => setOutSR(e.target.value)} disabled={!isPro}>
+                          <option value="44100">44.1 kHz</option>{isPro && <><option value="48000">48 kHz</option><option value="96000">96 kHz</option></>}
+                        </select></div>
+                      <div className="sel-row"><label>Bit Depth</label>
+                        <select className="sel" value={outBit} onChange={e => setOutBit(e.target.value)} disabled={!isPro}>
+                          <option value="16">16-bit</option>{isPro && <><option value="24">24-bit</option><option value="32">32-bit float</option></>}
+                        </select></div>
+                    </div>
+                    <div className="ctrl-group">
+                      <p className="g-title">Loudness &amp; Safety</p>
+                      <SliderRow label="Target LUFS" min={-24} max={-6}   step={0.5} value={targetLufs} onChange={setTargetLufs} unit=""      />
+                      <SliderRow label="Out Ceiling" min={-3}  max={-0.1} step={0.1} value={truePeak}   onChange={setTruePeak}   unit=" dBFS" />
+                      <SliderRow label="Presence"    min={0}   max={100}  step={1}   value={presence}   onChange={setPresence}   unit="%"     disabled={!isPro} accent />
+                    </div>
+                    <div className="ctrl-group">
+                      <p className="g-title">Tone Character</p>
+                      <SliderRow label="Warmth"       min={0} max={100} step={1} value={warmth} onChange={setWarmth} unit="%" disabled={!isPro} />
+                      <SliderRow label="Treble (Air)" min={0} max={100} step={1} value={treble} onChange={setTreble} unit="%" disabled={!isPro} />
+                    </div>
+                    <div className="ctrl-group">
+                      <p className="g-title">Stereo, Space &amp; Dynamics</p>
+                      <SliderRow label="Stereo Width" min={0} max={200} step={1} value={stereoWidth} onChange={setStereoWidth} unit="%" disabled={!isPro} />
+                      <SliderRow label="Space Depth"  min={0} max={100} step={1} value={spaceDepth}  onChange={setSpaceDepth}  unit="%" disabled={!isPro} />
+                      <SliderRow label="Mono Bass"    min={0} max={100} step={1} value={monoBass}    onChange={setMonoBass}    unit="%" disabled={!isPro} />
+                      <SliderRow label="Vari-Mu Glue" min={0} max={100} step={1} value={glueComp}    onChange={setGlueComp}    unit="%" disabled={!isPro} accent />
+                    </div>
+                  </div>
+                </section>
+
               </div>
-              <input type="file" id="u-file" hidden multiple onChange={handleFileUpload} accept="audio/*" />
-              <label
-                htmlFor="u-file"
-                className={`drop-zone${isDragOver ? ' drag-over' : ''}`}
-                onDragOver={handleDragOver}
-                onDragEnter={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-              >
-                <span className="drop-icon">{isDragOver ? '📂' : '🎵'}</span>
-                <span className="drop-main">{isDragOver ? '여기에 놓으세요!' : 'Drop audio files here or click to browse'}</span>
-                <span className="drop-sub">MP3 · WAV · FLAC · AIFF &nbsp;|&nbsp; Max {MAX_MB}MB per file</span>
-              </label>
-              <div className="action-row">
-                <label htmlFor="u-file" className="btn-sec">UPLOAD</label>
-                <button className="btn-prime" onClick={runBatchMastering} disabled={isProcessing || files.length === 0}>
-                  {btnLabel()}
+            )}
+
+            {/* ══════════════ AI MIXING TAB ══════════════ */}
+            {activeTab === 'mixing' && (
+              <div className="mixing-coming">
+                <div className="mixing-glow" />
+                <p className="mixing-eyebrow">Coming Soon</p>
+                <h2 className="mixing-title">AI Mixing</h2>
+                <p className="mixing-desc">
+                  DAW에서 완성한 트랙을 업로드하면<br />
+                  AI가 EQ, Compression, Stereo, FX를 분석하고<br />
+                  믹싱 방향을 제안해드립니다.
+                </p>
+                <div className="mixing-features">
+                  {['🎚 EQ 분석 & 제안', '🥁 드럼 버스 처리', '🎸 악기별 밸런스', '🌊 리버브 & 딜레이', '📊 주파수 충돌 감지', '🎯 장르별 믹싱 프리셋'].map(f => (
+                    <span key={f} className="mix-feat">{f}</span>
+                  ))}
+                </div>
+                <button className="btn-notify" onClick={() => toast('준비되면 알려드릴게요! 🎉', 'success')}>
+                  출시 알림 받기
                 </button>
               </div>
-              {engineStatus === 'warming' && (
-                <div className="cold-notice">
-                  <span className="spin" />
-                  AI 엔진을 깨우는 중입니다. 처음 실행 시 최대 30초 소요될 수 있어요.
-                </div>
-              )}
-              {isProcessing && progress.total > 0 && (
-                <div className="prog-track">
-                  <div className="prog-bar" style={{ width: `${progressPct}%` }} />
-                  <span className="prog-label">{Math.round(progressPct)}%</span>
-                </div>
-              )}
-              {Object.keys(masteredUrls).length > 1 && (
-                <button className="btn-zip" onClick={downloadZip}>📥 DOWNLOAD ALL AS ZIP</button>
-              )}
-              <ul className="track-list">
-                {files.map((f, i) => (
-                  <li key={i}
-                    className={`track-item${activeIndex === i ? ' active' : ''}`}
-                    onClick={() => {
-                      setActiveIndex(i); setOrigPlaying(false); setMastPlaying(false)
-                      origAnalyzer.current = null; mastAnalyzer.current = null
-                    }}>
-                    <span className="t-num">{String(i + 1).padStart(2, '0')}</span>
-                    <span className="t-name">{f.name}</span>
-                    {isProcessing && progress.cur === i + 1 && engineStatus === 'running' && <span className="t-badge proc">◎</span>}
-                    {masteredUrls[i] && <span className="t-badge done">✓</span>}
-                    {!isProcessing && (
-                      <button className="t-remove" onClick={e => removeTrack(e, i)} title="트랙 삭제">✕</button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </section>
-
-            <section className="panel">
-              <div className="panel-top">
-                <h3>A / B Monitor</h3>
-                <span>{files[activeIndex]?.name || '—'}</span>
-              </div>
-              <div className="mon-row">
-                <div className="mon-ctrl">
-                  <p className="mon-label orig-lbl">Original</p>
-                  <div className="meter-box">
-                    <div className="meter-row">
-                      <span>Integrated</span>
-                      <span className="mval">{origLufs} <span className="munit">LUFS</span></span>
-                    </div>
-                    <div className="meter-row">
-                      <span>Output</span>
-                      <span className="mval">{origTp} <span className="munit">dBFS</span></span>
-                    </div>
-                  </div>
-                  <button className="btn-play" onClick={() => togglePlay('orig')}>
-                    {origPlaying ? '■ STOP' : '▶ PLAY'}
-                  </button>
-                </div>
-                <div className="mon-wave">
-                  <div className="time-row">{fmt(origTime)} / {fmt(origDur)}</div>
-                  <div className="wave-box" onClick={e => handleSeek(e, origAudioRef, origDur, 'orig')}>
-                    <canvas ref={origCanvas} width={1000} height={140} />
-                    <div className="seeker sk-orig" style={{ left: origDur > 0 ? `${(origTime / origDur) * 100}%` : '0' }} />
-                  </div>
-                </div>
-                <audio ref={origAudioRef} src={currentOrigUrl}
-                  onTimeUpdate={e => setOrigTime(e.currentTarget.currentTime)}
-                  onLoadedMetadata={e => setOrigDur(e.currentTarget.duration)}
-                  onEnded={() => {
-                    setOrigPlaying(false)
-                    if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current)
-                    measureFilePeak(currentOrigUrl).then(({ lufs, tp }) => { setOrigLufs(lufs); setOrigTp(tp) })
-                  }} />
-              </div>
-              <div className="mon-row" style={{ marginTop: 20 }}>
-                <div className="mon-ctrl">
-                  <p className="mon-label mast-lbl">Mastered</p>
-                  <div className="meter-box">
-                    <div className="meter-row">
-                      <span>Integrated</span>
-                      <span className="mval pro">{mastLufs} <span className="munit">LUFS</span></span>
-                    </div>
-                    <div className="meter-row">
-                      <span>Output</span>
-                      <span className="mval pro">{mastTp} <span className="munit">dBFS</span></span>
-                    </div>
-                  </div>
-                  <button className="btn-play" onClick={() => togglePlay('mast')} disabled={!masteredUrls[activeIndex]}>
-                    {mastPlaying ? '■ STOP' : '▶ PLAY'}
-                  </button>
-                  {masteredUrls[activeIndex] && (
-                    <a className="btn-dl" href={masteredUrls[activeIndex]} download={getDownloadName()}>↓ DOWNLOAD</a>
-                  )}
-                </div>
-                <div className="mon-wave">
-                  <div className="time-row">{fmt(mastTime)} / {fmt(mastDur)}</div>
-                  <div className="wave-box" onClick={e => handleSeek(e, mastAudioRef, mastDur, 'mast')}>
-                    <canvas ref={mastCanvas} width={1000} height={140} />
-                    <div className="seeker sk-mast" style={{ left: mastDur > 0 ? `${(mastTime / mastDur) * 100}%` : '0' }} />
-                    {!masteredUrls[activeIndex] && <div className="no-file">No mastered file yet</div>}
-                  </div>
-                </div>
-                <audio ref={mastAudioRef} src={masteredUrls[activeIndex] || ''}
-                  onTimeUpdate={e => setMastTime(e.currentTarget.currentTime)}
-                  onLoadedMetadata={e => setMastDur(e.currentTarget.duration)}
-                  onEnded={() => {
-                    setMastPlaying(false)
-                    if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current)
-                    const url = masteredUrls[activeIndex]
-                    if (url) measureFilePeak(url).then(({ lufs, tp }) => { setMastLufs(lufs); setMastTp(tp) })
-                  }} />
-              </div>
-            </section>
-
-            {/* ── Mastering Presets ── */}
-            <section className="panel">
-              <div className="panel-top">
-                <h3>Mastering Presets</h3>
-                <div className="preset-top-right">
-                  {!isPro && <span className="lock">PRO ONLY 🔒</span>}
-                  {/* ✅ Default 리셋 버튼 */}
-                  <button className="btn-default" onClick={resetToDefault} title="모든 파라미터를 기본값으로 초기화">
-                    ↺ Default
-                  </button>
-                </div>
-              </div>
-              <div className="preset-grid">
-                {[
-                  { key: 'Hiphop',     icon: '🎤', label: 'Hiphop'     },
-                  { key: 'Electronic', icon: '⚡', label: 'Electronic' },
-                  { key: 'RnB',        icon: '🎸', label: 'R&B'        },
-                  { key: 'Film',       icon: '🎬', label: 'Film Music'  },
-                  { key: 'Ambient',    icon: '🌊', label: 'Ambient'     },
-                ].map(({ key, icon, label }) => (
-                  <button key={key} className="btn-preset" onClick={() => applyPreset(key)} disabled={!isPro}>
-                    <span className="p-icon">{icon}</span>
-                    <span>{label}</span>
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <section className="panel">
-              <div className="panel-top">
-                <h3>Mastering Controls</h3>
-                {!isPro && <span className="lock">PRO ONLY 🔒</span>}
-              </div>
-              <div className="ctrl-grid">
-                <div className="ctrl-group">
-                  <p className="g-title">Output Format</p>
-                  <div className="sel-row"><label>Format</label>
-                    <select className="sel" value={outFormat} onChange={e => setOutFormat(e.target.value)} disabled={!isPro}>
-                      <option value="MP3">MP3</option>
-                      {isPro && <><option value="WAV">WAV</option><option value="FLAC">FLAC</option></>}
-                    </select>
-                  </div>
-                  <div className="sel-row"><label>Sample Rate</label>
-                    <select className="sel" value={outSR} onChange={e => setOutSR(e.target.value)} disabled={!isPro}>
-                      <option value="44100">44.1 kHz</option>
-                      {isPro && <><option value="48000">48 kHz</option><option value="96000">96 kHz</option></>}
-                    </select>
-                  </div>
-                  <div className="sel-row"><label>Bit Depth</label>
-                    <select className="sel" value={outBit} onChange={e => setOutBit(e.target.value)} disabled={!isPro}>
-                      <option value="16">16-bit</option>
-                      {isPro && <><option value="24">24-bit</option><option value="32">32-bit float</option></>}
-                    </select>
-                  </div>
-                </div>
-                <div className="ctrl-group">
-                  <p className="g-title">Loudness &amp; Safety</p>
-                  <SliderRow label="Target LUFS" min={-24} max={-6}   step={0.5} value={targetLufs} onChange={setTargetLufs} unit=""      />
-                  <SliderRow label="Out Ceiling" min={-3}  max={-0.1} step={0.1} value={truePeak}   onChange={setTruePeak}   unit=" dBFS" />
-                  <SliderRow label="Presence"    min={0}   max={100}  step={1}   value={presence}   onChange={setPresence}   unit="%"     disabled={!isPro} accent />
-                </div>
-                <div className="ctrl-group">
-                  <p className="g-title">Tone Character</p>
-                  <SliderRow label="Warmth"       min={0} max={100} step={1} value={warmth}  onChange={setWarmth}  unit="%" disabled={!isPro} />
-                  <SliderRow label="Treble (Air)" min={0} max={100} step={1} value={treble}  onChange={setTreble}  unit="%" disabled={!isPro} />
-                </div>
-                <div className="ctrl-group">
-                  <p className="g-title">Stereo, Space &amp; Dynamics</p>
-                  <SliderRow label="Stereo Width" min={0}   max={200} step={1} value={stereoWidth} onChange={setStereoWidth} unit="%" disabled={!isPro} />
-                  <SliderRow label="Space Depth"  min={0}   max={100} step={1} value={spaceDepth}  onChange={setSpaceDepth}  unit="%" disabled={!isPro} />
-                  <SliderRow label="Mono Bass"    min={0}   max={100} step={1} value={monoBass}    onChange={setMonoBass}    unit="%" disabled={!isPro} />
-                  <SliderRow label="Vari-Mu Glue" min={0}   max={100} step={1} value={glueComp}    onChange={setGlueComp}    unit="%" disabled={!isPro} accent />
-                </div>
-              </div>
-            </section>
-
-          </div>
+            )}
+          </>
         )}
       </div>
 
       <style dangerouslySetInnerHTML={{ __html: `
-        .dark {
-          --bg: #080808; --sur: #111111; --sur2: #171717; --brd: #242424;
-          --txt: #ebebeb; --txt2: #777777; --acc: #4ade80; --acc2: #60a5fa;
-          --acc-bg: rgba(74,222,128,0.08); --danger: #f87171; --warn: #fbbf24;
-        }
-        .light {
-          --bg: #f0f0f0; --sur: #ffffff; --sur2: #f7f7f8; --brd: #e0e0e3;
-          --txt: #0a0a0a; --txt2: #555555; --acc: #16a34a; --acc2: #2563eb;
-          --acc-bg: rgba(22,163,74,0.07); --danger: #dc2626; --warn: #b45309;
-        }
+        .dark  { --bg:#080808; --sur:#111111; --sur2:#171717; --brd:#242424; --txt:#ebebeb; --txt2:#777777; --acc:#4ade80; --acc2:#60a5fa; --acc-bg:rgba(74,222,128,0.08); }
+        .light { --bg:#f0f0f0; --sur:#ffffff; --sur2:#f7f7f8; --brd:#e0e0e3; --txt:#0a0a0a; --txt2:#555555; --acc:#16a34a; --acc2:#2563eb; --acc-bg:rgba(22,163,74,0.07); }
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { background: var(--bg); color: var(--txt); font-family: -apple-system, BlinkMacSystemFont, 'Plus Jakarta Sans', 'Helvetica Neue', Arial, sans-serif; font-size: 14px; -webkit-font-smoothing: antialiased; transition: background .25s, color .25s; }
-        button, select, label { font-family: inherit; }
-        .toast-wrap { position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
-        .toast { padding: 11px 16px; border-radius: 8px; font-size: 0.78rem; font-weight: 600; border: 1px solid; max-width: 300px; animation: toastIn .25s ease; pointer-events: auto; }
-        .toast-success { background: rgba(74,222,128,.12); border-color: #4ade80; color: var(--txt); }
-        .toast-error   { background: rgba(248,113,113,.12); border-color: #f87171; color: var(--txt); }
-        .toast-warn    { background: rgba(251,191,36,.12); border-color: #fbbf24; color: var(--txt); }
-        .toast-info    { background: rgba(96,165,250,.12); border-color: #60a5fa; color: var(--txt); }
-        .light .toast  { color: #0a0a0a; }
-        @keyframes toastIn { from { opacity:0; transform:translateX(16px); } to { opacity:1; transform:translateX(0); } }
-        .ws     { max-width: 1200px; margin: 0 auto; padding: 20px; }
-        .layout { display: flex; flex-direction: column; gap: 20px; }
-        .hd       { display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; }
-        .brand    { font-size: 1.1rem; font-weight: 800; letter-spacing: 0.5px; color: var(--txt); }
-        .acc      { color: var(--acc); }
-        .hd-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-        .tier-chip { font-size: .65rem; font-weight: 800; letter-spacing: 1px; padding: 3px 10px; border-radius: 50px; background: var(--sur2); border: 1px solid var(--brd); color: var(--txt2); }
-        .eng-chip  { font-size: .65rem; font-weight: 800; letter-spacing: .5px; padding: 3px 10px; border-radius: 50px; border: 1px solid; }
-        .eng-chip.warm { background: rgba(251,191,36,.1); border-color: #fbbf24; color: #fbbf24; }
-        .eng-chip.run  { background: rgba(74,222,128,.1); border-color: var(--acc); color: var(--acc); }
-        .btn-sm   { background: var(--sur); border: 1px solid var(--brd); color: var(--txt); padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: .72rem; font-weight: 700; letter-spacing: .5px; transition: .15s; }
-        .btn-sm:hover { background: var(--sur2); border-color: var(--txt2); }
-        .panel     { background: var(--sur); border: 1px solid var(--brd); border-radius: 12px; padding: 22px; }
-        .panel-top { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--brd); padding-bottom: 14px; margin-bottom: 18px; }
-        .panel-top h3 { font-size: .78rem; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: var(--txt); }
-        .panel-top span { font-size: .72rem; color: var(--txt2); }
-        .lock { font-size: .65rem; background: var(--sur2); border: 1px solid var(--brd); padding: 2px 8px; border-radius: 50px; color: var(--txt2); }
-        /* ✅ Default 버튼 + 우측 그룹 */
-        .preset-top-right { display: flex; align-items: center; gap: 8px; }
-        .btn-default { background: none; border: 1px solid var(--brd); color: var(--txt2); padding: 3px 10px; border-radius: 50px; font-size: .65rem; font-weight: 700; cursor: pointer; letter-spacing: .3px; transition: .15s; }
-        .btn-default:hover { border-color: var(--acc); color: var(--acc); background: var(--acc-bg); }
-        .drop-zone  { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 88px; border: 1px dashed var(--brd); border-radius: 8px; cursor: pointer; transition: .2s; background: var(--sur2); padding: 20px; }
-        .drop-zone:hover { border-color: var(--acc); background: var(--acc-bg); }
-        .drop-zone.drag-over { border-color: var(--acc); background: var(--acc-bg); border-style: solid; transform: scale(1.01); }
-        .drop-icon  { font-size: 1.6rem; transition: .2s; }
-        .drop-main  { font-size: .83rem; font-weight: 600; color: var(--txt); }
-        .drop-sub   { font-size: .7rem; color: var(--txt2); }
-        .action-row { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; margin-top: 12px; }
-        .btn-prime  { background: var(--acc); color: #000; border: none; padding: 11px; border-radius: 6px; font-weight: 800; font-size: .78rem; letter-spacing: .5px; cursor: pointer; transition: .15s; }
-        .btn-prime:hover:not(:disabled) { filter: brightness(1.12); }
-        .btn-prime:disabled { opacity: .45; cursor: not-allowed; }
-        .btn-sec    { background: var(--sur2); color: var(--txt); border: 1px solid var(--brd); padding: 11px; border-radius: 6px; font-weight: 800; font-size: .78rem; letter-spacing: .5px; cursor: pointer; transition: .15s; text-align: center; display: flex; align-items: center; justify-content: center; }
-        .btn-sec:hover { border-color: var(--txt2); }
-        .btn-zip    { width: 100%; margin-top: 10px; background: var(--acc2); color: #fff; border: none; padding: 10px; border-radius: 6px; font-weight: 800; font-size: .78rem; cursor: pointer; transition: .15s; }
-        .btn-zip:hover { filter: brightness(1.1); }
-        .cold-notice { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 10px 14px; background: rgba(251,191,36,.07); border: 1px solid rgba(251,191,36,.35); border-radius: 7px; font-size: .75rem; color: var(--txt); }
-        .light .cold-notice { color: #0a0a0a; }
-        .spin { width: 13px; height: 13px; border: 2px solid rgba(251,191,36,.3); border-top-color: #fbbf24; border-radius: 50%; animation: spin .75s linear infinite; flex-shrink: 0; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .prog-track { position: relative; height: 26px; background: var(--sur2); border: 1px solid var(--brd); border-radius: 6px; overflow: hidden; margin-top: 12px; }
-        .prog-bar   { height: 100%; background: var(--acc); border-radius: 6px; transition: width .5s ease; }
-        .prog-label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: .68rem; font-weight: 800; color: #000; mix-blend-mode: difference; letter-spacing: 1px; }
-        .track-list { list-style: none; display: grid; grid-template-columns: repeat(auto-fill,minmax(270px,1fr)); gap: 7px; margin-top: 14px; }
-        .track-item { display: flex; align-items: center; gap: 9px; padding: 9px 12px; border-radius: 7px; border: 1px solid var(--brd); background: var(--sur2); cursor: pointer; transition: .15s; font-size: .78rem; color: var(--txt); }
-        .track-item:hover  { border-color: var(--txt2); }
-        .track-item.active { background: var(--acc-bg); border-color: var(--acc); }
-        .t-num  { font-size: .65rem; color: var(--txt2); font-weight: 800; flex-shrink: 0; }
-        .t-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--txt); }
-        .t-badge      { font-size: .65rem; font-weight: 800; flex-shrink: 0; }
-        .t-badge.done { color: var(--acc); }
-        .t-badge.proc { color: #fbbf24; }
-        .t-remove { flex-shrink: 0; background: none; border: none; color: var(--txt2); font-size: .75rem; cursor: pointer; padding: 2px 4px; border-radius: 4px; line-height: 1; opacity: 0; transition: .15s; }
-        .track-item:hover .t-remove { opacity: 1; }
-        .t-remove:hover { background: rgba(248,113,113,.15); color: #f87171; }
-        .mon-row   { display: flex; gap: 16px; align-items: flex-start; }
-        .mon-ctrl  { width: 120px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; }
-        .mon-label { font-size: .72rem; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
-        .orig-lbl  { color: var(--acc); }
-        .mast-lbl  { color: var(--acc2); }
-        .meter-box { display: flex; flex-direction: column; gap: 4px; }
-        .meter-row { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; font-size: .67rem; }
-        .meter-row span:first-child { color: var(--txt2); white-space: nowrap; }
-        .mval      { color: var(--acc); font-weight: 700; font-size: .72rem; white-space: nowrap; }
-        .mval.pro  { color: var(--acc2); }
-        .munit     { font-size: .58rem; font-weight: 500; opacity: .7; }
-        .btn-play  { width: 100%; padding: 6px; border: 1px solid var(--brd); background: var(--sur2); color: var(--txt); border-radius: 5px; font-size: .7rem; font-weight: 800; cursor: pointer; transition: .15s; }
-        .btn-play:hover:not(:disabled) { border-color: var(--txt2); }
-        .btn-play:disabled { opacity: .3; cursor: not-allowed; }
-        .btn-dl   { display: block; text-align: center; margin-top: 5px; padding: 6px; border-radius: 5px; background: var(--acc2); color: #fff; font-size: .7rem; font-weight: 800; text-decoration: none; }
-        .mon-wave  { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-        .time-row  { text-align: right; font-size: .68rem; color: var(--txt2); font-weight: 700; margin-bottom: 5px; }
-        .wave-box  { width: 100%; height: 148px; background: var(--sur2); border: 1px solid var(--brd); border-radius: 8px; position: relative; overflow: hidden; cursor: pointer; }
-        canvas     { width: 100%; height: 100%; display: block; }
-        .seeker    { position: absolute; top: 0; bottom: 0; width: 2px; pointer-events: none; }
-        .sk-orig   { background: var(--acc);  box-shadow: 0 0 7px rgba(74,222,128,.6); }
-        .sk-mast   { background: var(--acc2); box-shadow: 0 0 7px rgba(96,165,250,.6); }
-        .no-file   { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: .8rem; color: var(--txt2); }
-        .preset-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(130px,1fr)); gap: 10px; }
-        .btn-preset  { background: var(--sur2); color: var(--txt); border: 1px solid var(--brd); padding: 14px 10px; border-radius: 8px; font-weight: 800; font-size: .76rem; cursor: pointer; transition: .18s; display: flex; flex-direction: column; align-items: center; gap: 6px; }
-        .btn-preset:hover:not(:disabled) { border-color: var(--acc); background: var(--acc-bg); color: var(--txt); }
-        .btn-preset:disabled { opacity: .3; cursor: not-allowed; }
-        .p-icon { font-size: 1.3rem; }
-        .ctrl-grid  { display: grid; grid-template-columns: repeat(auto-fit,minmax(255px,1fr)); gap: 14px; }
-        .ctrl-group { background: var(--sur2); padding: 17px; border-radius: 8px; border: 1px solid var(--brd); }
-        .g-title    { font-size: .68rem; font-weight: 800; letter-spacing: 1.2px; text-transform: uppercase; padding-bottom: 10px; margin-bottom: 14px; border-bottom: 1px solid var(--brd); color: var(--txt); }
-        .sel-row    { margin-bottom: 11px; }
-        .sel-row label { font-size: .68rem; color: var(--txt2); display: block; margin-bottom: 4px; }
-        .sel        { width: 100%; background: var(--sur); color: var(--txt); border: 1px solid var(--brd); padding: 7px 9px; border-radius: 5px; font-size: .76rem; font-family: inherit; }
-        .sel:disabled { opacity: .35; }
-        .light .sel { color: #0a0a0a; }
-        .sld-row    { display: flex; align-items: center; gap: 8px; margin-bottom: 11px; }
-        .sld-label  { font-size: .7rem; color: var(--txt2); width: 95px; flex-shrink: 0; }
-        .sld-label.acc { color: var(--acc); }
-        .sld-row input[type="range"] { flex: 1; min-width: 0; accent-color: var(--acc); cursor: pointer; }
-        .sld-row input[type="range"]:disabled { opacity: .3; cursor: not-allowed; }
-        .sld-val    { width: 70px; flex-shrink: 0; font-size: .68rem; text-align: right; color: var(--acc); font-weight: 700; white-space: nowrap; }
-        .hero        { text-align: center; padding: 110px 0; }
-        .hero-eyebrow { font-size: .7rem; letter-spacing: 3px; text-transform: uppercase; color: var(--txt2); margin-bottom: 18px; }
-        .hero-title  { font-size: 5.5rem; font-weight: 900; letter-spacing: -5px; line-height: .85; color: var(--txt); margin-bottom: 48px; }
-        .hero .btn-prime { font-size: .88rem; padding: 13px 30px; border-radius: 8px; }
-        .light { color: #0a0a0a; }
-        .light .tier-chip, .light .panel-top span, .light .t-num,
-        .light .drop-sub, .light .time-row, .light .meter-row span:first-child,
-        .light .sld-label, .light .sel-row label { color: #555555; }
+        * { box-sizing:border-box; margin:0; padding:0; }
+        body { background:var(--bg); color:var(--txt); font-family:-apple-system,BlinkMacSystemFont,'Plus Jakarta Sans','Helvetica Neue',Arial,sans-serif; font-size:14px; -webkit-font-smoothing:antialiased; transition:background .25s,color .25s; }
+        button,select,label { font-family:inherit; }
+
+        .toast-wrap { position:fixed; bottom:24px; right:24px; z-index:9999; display:flex; flex-direction:column; gap:8px; pointer-events:none; }
+        .toast { padding:11px 16px; border-radius:8px; font-size:.78rem; font-weight:600; border:1px solid; max-width:300px; animation:toastIn .25s ease; pointer-events:auto; }
+        .toast-success { background:rgba(74,222,128,.12); border-color:#4ade80; color:var(--txt); }
+        .toast-error   { background:rgba(248,113,113,.12); border-color:#f87171; color:var(--txt); }
+        .toast-warn    { background:rgba(251,191,36,.12);  border-color:#fbbf24; color:var(--txt); }
+        .toast-info    { background:rgba(96,165,250,.12);  border-color:#60a5fa; color:var(--txt); }
+        .light .toast  { color:#0a0a0a; }
+        @keyframes toastIn { from{opacity:0;transform:translateX(16px)} to{opacity:1;transform:translateX(0)} }
+
+        .ws  { max-width:1200px; margin:0 auto; padding:20px; }
+        .hd  { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
+        .brand { font-size:1.1rem; font-weight:800; letter-spacing:.5px; color:var(--txt); }
+        .acc   { color:var(--acc); }
+        .hd-right { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+        .tier-chip { font-size:.65rem; font-weight:800; letter-spacing:1px; padding:3px 10px; border-radius:50px; background:var(--sur2); border:1px solid var(--brd); color:var(--txt2); }
+        .eng-chip  { font-size:.65rem; font-weight:800; letter-spacing:.5px; padding:3px 10px; border-radius:50px; border:1px solid; }
+        .eng-chip.warm { background:rgba(251,191,36,.1); border-color:#fbbf24; color:#fbbf24; }
+        .eng-chip.run  { background:rgba(74,222,128,.1); border-color:var(--acc); color:var(--acc); }
+        .btn-sm { background:var(--sur); border:1px solid var(--brd); color:var(--txt); padding:5px 12px; border-radius:6px; cursor:pointer; font-size:.72rem; font-weight:700; letter-spacing:.5px; transition:.15s; }
+        .btn-sm:hover { background:var(--sur2); border-color:var(--txt2); }
+
+        /* ── 탭 네비게이션 ── */
+        .tab-nav { display:flex; gap:4px; margin-bottom:24px; border-bottom:1px solid var(--brd); padding-bottom:0; }
+        .tab-btn { display:flex; align-items:center; gap:7px; padding:10px 18px; background:none; border:none; border-bottom:2px solid transparent; color:var(--txt2); font-size:.8rem; font-weight:700; cursor:pointer; transition:.15s; letter-spacing:.3px; margin-bottom:-1px; }
+        .tab-btn:hover { color:var(--txt); }
+        .tab-btn.active { color:var(--acc); border-bottom-color:var(--acc); }
+        .tab-icon { font-size:1rem; }
+        .tab-soon { font-size:.55rem; font-weight:800; background:var(--sur2); border:1px solid var(--brd); color:var(--txt2); padding:2px 6px; border-radius:50px; letter-spacing:.5px; }
+
+        .layout { display:flex; flex-direction:column; gap:20px; }
+        .panel  { background:var(--sur); border:1px solid var(--brd); border-radius:12px; padding:22px; }
+        .panel-top { display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--brd); padding-bottom:14px; margin-bottom:18px; }
+        .panel-top h3 { font-size:.78rem; font-weight:700; letter-spacing:.5px; text-transform:uppercase; color:var(--txt); }
+        .panel-top span { font-size:.72rem; color:var(--txt2); }
+        .lock { font-size:.65rem; background:var(--sur2); border:1px solid var(--brd); padding:2px 8px; border-radius:50px; color:var(--txt2); }
+
+        .drop-zone { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; min-height:88px; border:1px dashed var(--brd); border-radius:8px; cursor:pointer; transition:.2s; background:var(--sur2); padding:20px; }
+        .drop-zone:hover,.drop-zone.drag-over { border-color:var(--acc); background:var(--acc-bg); }
+        .drop-zone.drag-over { border-style:solid; transform:scale(1.01); }
+        .drop-icon { font-size:1.6rem; } .drop-main { font-size:.83rem; font-weight:600; color:var(--txt); } .drop-sub { font-size:.7rem; color:var(--txt2); }
+        .action-row { display:grid; grid-template-columns:1fr 2fr; gap:10px; margin-top:12px; }
+        .btn-prime { background:var(--acc); color:#000; border:none; padding:11px; border-radius:6px; font-weight:800; font-size:.78rem; letter-spacing:.5px; cursor:pointer; transition:.15s; }
+        .btn-prime:hover:not(:disabled) { filter:brightness(1.12); } .btn-prime:disabled { opacity:.45; cursor:not-allowed; }
+        .btn-sec { background:var(--sur2); color:var(--txt); border:1px solid var(--brd); padding:11px; border-radius:6px; font-weight:800; font-size:.78rem; cursor:pointer; transition:.15s; text-align:center; display:flex; align-items:center; justify-content:center; }
+        .btn-sec:hover { border-color:var(--txt2); }
+        .btn-zip { width:100%; margin-top:10px; background:var(--acc2); color:#fff; border:none; padding:10px; border-radius:6px; font-weight:800; font-size:.78rem; cursor:pointer; }
+        .cold-notice { display:flex; align-items:center; gap:10px; margin-top:10px; padding:10px 14px; background:rgba(251,191,36,.07); border:1px solid rgba(251,191,36,.35); border-radius:7px; font-size:.75rem; color:var(--txt); }
+        .light .cold-notice { color:#0a0a0a; }
+        .spin { width:13px; height:13px; border:2px solid rgba(251,191,36,.3); border-top-color:#fbbf24; border-radius:50%; animation:spin .75s linear infinite; flex-shrink:0; }
+        @keyframes spin { to{transform:rotate(360deg)} }
+        .prog-track { position:relative; height:26px; background:var(--sur2); border:1px solid var(--brd); border-radius:6px; overflow:hidden; margin-top:12px; }
+        .prog-bar   { height:100%; background:var(--acc); border-radius:6px; transition:width .5s ease; }
+        .prog-label { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:.68rem; font-weight:800; color:#000; mix-blend-mode:difference; letter-spacing:1px; }
+        .track-list { list-style:none; display:grid; grid-template-columns:repeat(auto-fill,minmax(270px,1fr)); gap:7px; margin-top:14px; }
+        .track-item { display:flex; align-items:center; gap:9px; padding:9px 12px; border-radius:7px; border:1px solid var(--brd); background:var(--sur2); cursor:pointer; transition:.15s; font-size:.78rem; color:var(--txt); }
+        .track-item:hover  { border-color:var(--txt2); } .track-item.active { background:var(--acc-bg); border-color:var(--acc); }
+        .t-num { font-size:.65rem; color:var(--txt2); font-weight:800; flex-shrink:0; }
+        .t-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--txt); }
+        .t-badge { font-size:.65rem; font-weight:800; flex-shrink:0; } .t-badge.done { color:var(--acc); } .t-badge.proc { color:#fbbf24; }
+        .t-remove { flex-shrink:0; background:none; border:none; color:var(--txt2); font-size:.75rem; cursor:pointer; padding:2px 4px; border-radius:4px; opacity:0; transition:.15s; }
+        .track-item:hover .t-remove { opacity:1; } .t-remove:hover { background:rgba(248,113,113,.15); color:#f87171; }
+
+        .mon-row { display:flex; gap:16px; align-items:flex-start; }
+        .mon-ctrl { width:120px; flex-shrink:0; display:flex; flex-direction:column; gap:8px; }
+        .mon-label { font-size:.72rem; font-weight:800; letter-spacing:1px; text-transform:uppercase; }
+        .orig-lbl { color:var(--acc); } .mast-lbl { color:var(--acc2); }
+        .meter-box { display:flex; flex-direction:column; gap:4px; }
+        .meter-row { display:flex; justify-content:space-between; align-items:baseline; gap:4px; font-size:.67rem; }
+        .meter-row span:first-child { color:var(--txt2); white-space:nowrap; }
+        .mval { color:var(--acc); font-weight:700; font-size:.72rem; white-space:nowrap; } .mval.pro { color:var(--acc2); }
+        .munit { font-size:.58rem; font-weight:500; opacity:.7; }
+        .btn-play { width:100%; padding:6px; border:1px solid var(--brd); background:var(--sur2); color:var(--txt); border-radius:5px; font-size:.7rem; font-weight:800; cursor:pointer; transition:.15s; }
+        .btn-play:hover:not(:disabled) { border-color:var(--txt2); } .btn-play:disabled { opacity:.3; cursor:not-allowed; }
+        .btn-dl { display:block; text-align:center; margin-top:5px; padding:6px; border-radius:5px; background:var(--acc2); color:#fff; font-size:.7rem; font-weight:800; text-decoration:none; }
+        .mon-wave { flex:1; min-width:0; display:flex; flex-direction:column; }
+        .time-row { text-align:right; font-size:.68rem; color:var(--txt2); font-weight:700; margin-bottom:5px; }
+        .wave-box { width:100%; height:148px; background:var(--sur2); border:1px solid var(--brd); border-radius:8px; position:relative; overflow:hidden; cursor:pointer; }
+        canvas { width:100%; height:100%; display:block; }
+        .seeker { position:absolute; top:0; bottom:0; width:2px; pointer-events:none; }
+        .sk-orig { background:var(--acc); box-shadow:0 0 7px rgba(74,222,128,.6); }
+        .sk-mast { background:var(--acc2); box-shadow:0 0 7px rgba(96,165,250,.6); }
+        .no-file { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:.8rem; color:var(--txt2); }
+
+        .preset-top-right { display:flex; align-items:center; gap:8px; }
+        .btn-default { background:none; border:1px solid var(--brd); color:var(--txt2); padding:3px 10px; border-radius:50px; font-size:.65rem; font-weight:700; cursor:pointer; transition:.15s; }
+        .btn-default:hover { border-color:var(--acc); color:var(--acc); background:var(--acc-bg); }
+        .preset-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; }
+        .btn-preset { background:var(--sur2); color:var(--txt); border:1px solid var(--brd); padding:14px 10px; border-radius:8px; font-weight:800; font-size:.76rem; cursor:pointer; transition:.18s; display:flex; flex-direction:column; align-items:center; gap:6px; }
+        .btn-preset:hover:not(:disabled) { border-color:var(--acc); background:var(--acc-bg); } .btn-preset:disabled { opacity:.3; cursor:not-allowed; }
+        .p-icon { font-size:1.3rem; }
+
+        .ctrl-grid  { display:grid; grid-template-columns:repeat(auto-fit,minmax(255px,1fr)); gap:14px; }
+        .ctrl-group { background:var(--sur2); padding:17px; border-radius:8px; border:1px solid var(--brd); }
+        .g-title    { font-size:.68rem; font-weight:800; letter-spacing:1.2px; text-transform:uppercase; padding-bottom:10px; margin-bottom:14px; border-bottom:1px solid var(--brd); color:var(--txt); }
+        .sel-row    { margin-bottom:11px; }
+        .sel-row label { font-size:.68rem; color:var(--txt2); display:block; margin-bottom:4px; }
+        .sel { width:100%; background:var(--sur); color:var(--txt); border:1px solid var(--brd); padding:7px 9px; border-radius:5px; font-size:.76rem; font-family:inherit; }
+        .sel:disabled { opacity:.35; } .light .sel { color:#0a0a0a; }
+        .sld-row    { display:flex; align-items:center; gap:8px; margin-bottom:11px; }
+        .sld-label  { font-size:.7rem; color:var(--txt2); width:95px; flex-shrink:0; }
+        .sld-label.acc { color:var(--acc); }
+        .sld-row input[type="range"] { flex:1; min-width:0; accent-color:var(--acc); cursor:pointer; }
+        .sld-row input[type="range"]:disabled { opacity:.3; cursor:not-allowed; }
+        .sld-val { width:70px; flex-shrink:0; font-size:.68rem; text-align:right; color:var(--acc); font-weight:700; white-space:nowrap; }
+
+        /* ── Hero ── */
+        .hero { text-align:center; padding:110px 0; }
+        .hero-eyebrow { font-size:.7rem; letter-spacing:3px; text-transform:uppercase; color:var(--txt2); margin-bottom:18px; }
+        .hero-title { font-size:5.5rem; font-weight:900; letter-spacing:-5px; line-height:.85; color:var(--txt); margin-bottom:48px; }
+        .hero .btn-prime { font-size:.88rem; padding:13px 30px; border-radius:8px; }
+
+        /* ── AI Mixing Coming Soon ── */
+        .mixing-coming { text-align:center; padding:80px 20px; position:relative; overflow:hidden; }
+        .mixing-glow   { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:500px; height:500px; background:radial-gradient(circle, rgba(96,165,250,0.06) 0%, transparent 70%); pointer-events:none; }
+        .mixing-eyebrow { font-size:.7rem; letter-spacing:3px; text-transform:uppercase; color:var(--acc2); margin-bottom:14px; font-weight:700; }
+        .mixing-title  { font-size:3.5rem; font-weight:900; letter-spacing:-3px; color:var(--txt); margin-bottom:20px; }
+        .mixing-desc   { font-size:.92rem; color:var(--txt2); line-height:1.8; margin-bottom:40px; }
+        .mixing-features { display:flex; flex-wrap:wrap; justify-content:center; gap:10px; margin-bottom:40px; }
+        .mix-feat { background:var(--sur2); border:1px solid var(--brd); color:var(--txt2); padding:8px 16px; border-radius:50px; font-size:.75rem; font-weight:600; }
+        .btn-notify { background:var(--acc2); color:#fff; border:none; padding:12px 28px; border-radius:8px; font-size:.82rem; font-weight:800; cursor:pointer; transition:.15s; letter-spacing:.3px; }
+        .btn-notify:hover { filter:brightness(1.1); }
+
+        .light { color:#0a0a0a; }
+        .light .tier-chip,.light .panel-top span,.light .t-num,
+        .light .drop-sub,.light .time-row,.light .meter-row span:first-child,
+        .light .sld-label,.light .sel-row label { color:#555555; }
       `}} />
     </main>
   )
