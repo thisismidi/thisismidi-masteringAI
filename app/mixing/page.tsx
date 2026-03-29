@@ -299,7 +299,7 @@ export default function MixingPage() {
   const anlLRef     = useRef<AnalyserNode | null>(null)
   const anlRRef     = useRef<AnalyserNode | null>(null)
   const playRef     = useRef(false)
-  const animRef     = useRef<number>()
+ const animRef     = useRef<number | undefined>(undefined)
 
   // ── VU meter state (refs for RAF, not React state) ──
   const vuLRef       = useRef(VU_MIN)
