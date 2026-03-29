@@ -54,9 +54,9 @@ export default function Home() {
   const [origPlaying, setOrigPlaying] = useState(false)
   const [mastPlaying, setMastPlaying] = useState(false)
 
+  // Output Trim 완전 제거됨
   const [targetLufs, setTargetLufs]   = useState('-14.0')
   const [truePeak, setTruePeak]       = useState('-1.0')
-  const [outputTrim, setOutputTrim]   = useState('0.0')
   const [presence, setPresence]       = useState('0')
   const [warmth, setWarmth]           = useState('0')
   const [treble, setTreble]           = useState('0')
@@ -155,14 +155,10 @@ export default function Home() {
     const mastColor = isDark ? '#60a5fa' : '#2563eb'
     if (files[activeIndex] && origCanvas.current) {
       drawWave(files[activeIndex], origCanvas.current, origColor)
-    } else {
-      clearCanvas(origCanvas.current)
-    }
+    } else { clearCanvas(origCanvas.current) }
     if (masteredUrls[activeIndex] && mastCanvas.current) {
       drawWave(masteredUrls[activeIndex], mastCanvas.current, mastColor)
-    } else {
-      clearCanvas(mastCanvas.current)
-    }
+    } else { clearCanvas(mastCanvas.current) }
   }, [files, activeIndex, isDark, masteredUrls])
 
   const ensureRouting = (audio: HTMLAudioElement) => {
@@ -258,16 +254,13 @@ export default function Home() {
       if (ki < index) newUrls[ki] = v
       else if (ki > index) newUrls[ki - 1] = v
     })
-    setFiles(newFiles)
-    setMasteredUrls(newUrls)
+    setFiles(newFiles); setMasteredUrls(newUrls)
     if (newFiles.length === 0) {
       clearCanvas(origCanvas.current); clearCanvas(mastCanvas.current)
       setActiveIndex(0)
       setOrigLufs(-70); setOrigTp(-70); setMastLufs(-70); setMastTp(-70)
       setOrigTime(0); setOrigDur(0); setMastTime(0); setMastDur(0)
-    } else {
-      setActiveIndex(Math.min(activeIndex, newFiles.length - 1))
-    }
+    } else { setActiveIndex(Math.min(activeIndex, newFiles.length - 1)) }
     toast('트랙 삭제됨', 'info')
   }
 
@@ -316,7 +309,7 @@ export default function Home() {
       const fd = new FormData()
       fd.append('file', files[i])
       fd.append('out_format', outFormat); fd.append('out_sample_rate', outSR); fd.append('out_bit_depth', outBit)
-      fd.append('target_lufs', targetLufs); fd.append('true_peak', truePeak); fd.append('output_trim', outputTrim)
+      fd.append('target_lufs', targetLufs); fd.append('true_peak', truePeak)
       fd.append('presence', presence); fd.append('warmth', warmth); fd.append('treble', treble)
       fd.append('stereo_width', stereoWidth); fd.append('space_depth', spaceDepth)
       fd.append('mono_bass', monoBass); fd.append('glue_comp', glueComp)
@@ -561,10 +554,9 @@ export default function Home() {
                 </div>
                 <div className="ctrl-group">
                   <p className="g-title">Loudness &amp; Safety</p>
-                  <SliderRow label="Target LUFS"  min={-24} max={-6}  step={0.5} value={targetLufs}  onChange={setTargetLufs}  unit=""      />
-                  <SliderRow label="True Peak"    min={-3}  max={0}   step={0.1} value={truePeak}    onChange={setTruePeak}    unit=" dBTP" />
-                  <SliderRow label="Output Trim"  min={-6}  max={6}   step={0.1} value={outputTrim}  onChange={setOutputTrim}  unit=" dB"   disabled={!isPro} />
-                  <SliderRow label="Presence"     min={0}   max={100} step={1}   value={presence}    onChange={setPresence}    unit="%"     disabled={!isPro} accent />
+                  <SliderRow label="Target LUFS" min={-24} max={-6}  step={0.5} value={targetLufs} onChange={setTargetLufs} unit=""      />
+                  <SliderRow label="True Peak"   min={-3}  max={-0.1} step={0.1} value={truePeak}   onChange={setTruePeak}   unit=" dBTP" />
+                  <SliderRow label="Presence"    min={0}   max={100}  step={1}   value={presence}   onChange={setPresence}   unit="%"     disabled={!isPro} accent />
                 </div>
                 <div className="ctrl-group">
                   <p className="g-title">Tone Character</p>
